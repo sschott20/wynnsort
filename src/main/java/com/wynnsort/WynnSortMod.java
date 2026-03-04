@@ -39,7 +39,7 @@ public class WynnSortMod implements ClientModInitializer {
     }
 
     public static void logError(String message, Object... args) {
-        logError(message, args);
+        LOGGER.error(message, args);
         PersistentLog.error(message, args);
     }
 
