@@ -45,12 +45,10 @@ public final class TradeMarketSortHelper {
             Matcher m = SORT_PATTERN.matcher(currentText);
 
             if (m.find()) {
-                // Remove existing sort token
                 String newText = m.replaceAll("").trim();
                 searchWidget.setTextBoxInput(newText);
                 WynnSortMod.log("Quality sort disabled");
             } else {
-                // Add sort token based on current SortState
                 String token = SortState.getSortToken();
                 String newText = currentText.isEmpty() ? token : currentText + " " + token;
                 searchWidget.setTextBoxInput(newText);
@@ -58,6 +56,40 @@ public final class TradeMarketSortHelper {
             }
         } catch (IllegalAccessException e) {
             WynnSortMod.logError("Failed to access itemSearchWidget", e);
+        }
+    }
+
+    /**
+     * Injects a specific sort token into the Wynntils search widget,
+     * replacing any existing sort:X token. Used by preset application.
+     */
+    public static void tryInjectSortToken(Screen screen, String sortToken) {
+        if (!(screen instanceof TradeMarketSearchResultScreen tradeScreen)) {
+            return;
+        }
+
+        if (!fieldResolved) {
+            resolveField();
+        }
+
+        if (itemSearchWidgetField == null) {
+            WynnSortMod.logWarn("itemSearchWidget field was not resolved; cannot inject sort token");
+            return;
+        }
+
+        try {
+            ItemSearchWidget searchWidget = (ItemSearchWidget) itemSearchWidgetField.get(tradeScreen);
+            if (searchWidget == null) return;
+
+            String currentText = searchWidget.getTextBoxInput();
+            Matcher m = SORT_PATTERN.matcher(currentText);
+            String cleaned = m.replaceAll("").trim();
+
+            String newText = cleaned.isEmpty() ? sortToken : cleaned + " " + sortToken;
+            searchWidget.setTextBoxInput(newText);
+            WynnSortMod.log("Injected sort token from preset: {}", sortToken);
+        } catch (IllegalAccessException e) {
+            WynnSortMod.logError("Failed to inject sort token", e);
         }
     }
 

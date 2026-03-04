@@ -2,7 +2,10 @@ package com.wynnsort.mixin;
 
 import com.wynnsort.SortState;
 import com.wynnsort.StatPickerHelper;
+import com.wynnsort.WynnSortMod;
 import com.wynnsort.config.WynnSortConfig;
+import com.wynnsort.market.SearchPreset;
+import com.wynnsort.market.SearchPresetStore;
 import com.wynnsort.util.ScoreComputation;
 import com.wynntils.core.components.Models;
 import com.wynntils.models.gear.type.GearInstance;
@@ -48,13 +51,20 @@ public abstract class ContainerScreenMixin extends Screen {
     @Unique private String wynnsort$lastContainerTitle = null;
     @Unique private static final int WYNNSORT$MAX_STAT_ROWS = 12;
 
+    // Preset buttons
+    @Unique private static final int WYNNSORT$PRESET_COUNT = 5;
+    @Unique private final List<Button> wynnsort$presetButtons = new ArrayList<>();
+    @Unique private int wynnsort$activePresetIndex = -1;
+    // Preset name editing
+    @Unique private EditBox wynnsort$presetNameInput = null;
+    @Unique private int wynnsort$editingPresetIndex = -1;
+
     protected ContainerScreenMixin(Component title) {
         super(title);
     }
 
     @Inject(method = "init", at = @At("RETURN"))
     private void wynnsort$onInit(CallbackInfo ci) {
-        // Reset stat filter state for new screen
         wynnsort$statBoxes.clear();
         wynnsort$statNames.clear();
         wynnsort$statsBuilt = false;
@@ -67,12 +77,7 @@ public abstract class ContainerScreenMixin extends Screen {
         int x = leftPos + imageWidth + 8;
         int y = topPos + 2;
 
-        // Search bar (still available for advanced text input)
-        wynnsort$statInput = new EditBox(
-                this.font,
-                x, y,
-                120, 16,
-                Component.literal("Stat"));
+        wynnsort$statInput = new EditBox(this.font, x, y, 120, 16, Component.literal("Stat"));
         wynnsort$statInput.setMaxLength(128);
         wynnsort$statInput.setHint(Component.literal("overall"));
 
@@ -82,7 +87,6 @@ public abstract class ContainerScreenMixin extends Screen {
             SortState.setRawInput(WynnSortConfig.INSTANCE.lastFilter);
         }
         wynnsort$statInput.setValue(SortState.getRawInput());
-
         wynnsort$statInput.setResponder(text -> {
             SortState.setRawInput(text);
             WynnSortConfig.INSTANCE.lastFilter = text == null ? "" : text;
@@ -90,48 +94,156 @@ public abstract class ContainerScreenMixin extends Screen {
             wynnsort$updateStatInputColor();
         });
         this.addRenderableWidget(wynnsort$statInput);
-
-        // Color the restored filter
         wynnsort$updateStatInputColor();
 
-        // Scale mode buttons
         boolean useWeighted = WynnSortConfig.INSTANCE.useWeightedScale;
-
         wynnsort$noriButton = Button.builder(
-                        Component.literal(useWeighted ? "[Nori]" : "Nori"),
-                        btn -> wynnsort$setScaleMode(true))
-                .pos(x, y + 20)
-                .size(58, 14)
-                .build();
+                Component.literal(useWeighted ? "[Nori]" : "Nori"),
+                btn -> wynnsort$setScaleMode(true))
+                .pos(x, y + 20).size(58, 14).build();
         this.addRenderableWidget(wynnsort$noriButton);
 
         wynnsort$overallButton = Button.builder(
-                        Component.literal(useWeighted ? "Overall" : "[Overall]"),
-                        btn -> wynnsort$setScaleMode(false))
-                .pos(x + 62, y + 20)
-                .size(58, 14)
-                .build();
+                Component.literal(useWeighted ? "Overall" : "[Overall]"),
+                btn -> wynnsort$setScaleMode(false))
+                .pos(x + 62, y + 20).size(58, 14).build();
         this.addRenderableWidget(wynnsort$overallButton);
+
+        // Preset buttons
+        wynnsort$presetButtons.clear();
+        wynnsort$activePresetIndex = -1;
+        wynnsort$presetNameInput = null;
+        wynnsort$editingPresetIndex = -1;
+
+        if (WynnSortConfig.INSTANCE.searchPresetsEnabled) {
+            int presetY = y + 38;
+            int btnWidth = 22;
+            int gap = 2;
+            for (int i = 0; i < WYNNSORT$PRESET_COUNT; i++) {
+                final int idx = i;
+                Button presetBtn = Button.builder(
+                        Component.literal(String.valueOf(i + 1)),
+                        btn -> wynnsort$onPresetClick(idx))
+                        .pos(x + i * (btnWidth + gap), presetY)
+                        .size(btnWidth, 14).build();
+                wynnsort$presetButtons.add(presetBtn);
+                this.addRenderableWidget(presetBtn);
+            }
+        }
+    }
+
+    @Unique
+    private void wynnsort$onPresetClick(int index) {
+        SearchPreset preset = SearchPresetStore.getPreset(index);
+        if (preset == null) {
+            wynnsort$saveCurrentAsPreset(index);
+            return;
+        }
+        wynnsort$applyPreset(index, preset);
+    }
+
+    @Unique
+    private void wynnsort$applyPreset(int index, SearchPreset preset) {
+        if (preset == null) return;
+        SortState.setRawInput(preset.query != null ? preset.query : "");
+        if (wynnsort$statInput != null) {
+            wynnsort$statInput.setResponder(t -> {});
+            wynnsort$statInput.setValue(SortState.getRawInput());
+            wynnsort$statInput.setResponder(text -> {
+                SortState.setRawInput(text);
+                WynnSortConfig.INSTANCE.lastFilter = text == null ? "" : text;
+                WynnSortConfig.save();
+                wynnsort$updateStatInputColor();
+            });
+        }
+        WynnSortConfig.INSTANCE.lastFilter = SortState.getRawInput();
+        WynnSortConfig.save();
+        wynnsort$updateStatInputColor();
+
+        if (preset.sortToken != null && !preset.sortToken.isEmpty()) {
+            try {
+                com.wynnsort.TradeMarketSortHelper.tryInjectSortToken(
+                        (Screen) (Object) this, preset.sortToken);
+            } catch (Exception e) {
+                WynnSortMod.logWarn("[WynnSort] Failed to inject sort token for preset: {}", e.getMessage());
+            }
+        }
+        wynnsort$activePresetIndex = index;
+        if (this.minecraft != null && this.minecraft.player != null) {
+            String name = preset.name != null ? preset.name : "Preset " + (index + 1);
+            this.minecraft.player.displayClientMessage(
+                    Component.literal("[WynnSort] Applied preset: " + name), true);
+        }
+    }
+
+    @Unique
+    private void wynnsort$saveCurrentAsPreset(int index) {
+        wynnsort$editingPresetIndex = index;
+        int x = leftPos + imageWidth + 8;
+        int presetNameY = topPos + 56;
+        wynnsort$presetNameInput = new EditBox(this.font, x, presetNameY, 120, 14, Component.literal("Preset Name"));
+        wynnsort$presetNameInput.setMaxLength(24);
+        wynnsort$presetNameInput.setHint(Component.literal("Preset " + (index + 1)));
+        wynnsort$presetNameInput.setValue("Preset " + (index + 1));
+        wynnsort$presetNameInput.setFocused(true);
+        this.addRenderableWidget(wynnsort$presetNameInput);
+    }
+
+    @Unique
+    private void wynnsort$confirmPresetSave() {
+        if (wynnsort$editingPresetIndex < 0 || wynnsort$presetNameInput == null) return;
+        String name = wynnsort$presetNameInput.getValue().trim();
+        if (name.isEmpty()) name = "Preset " + (wynnsort$editingPresetIndex + 1);
+        SearchPreset preset = new SearchPreset(name, SortState.getRawInput(), SortState.getSortToken());
+        SearchPresetStore.setPreset(wynnsort$editingPresetIndex, preset);
+        if (this.minecraft != null && this.minecraft.player != null) {
+            this.minecraft.player.displayClientMessage(
+                    Component.literal("[WynnSort] Saved preset " + (wynnsort$editingPresetIndex + 1) + ": " + name), true);
+        }
+        this.removeWidget(wynnsort$presetNameInput);
+        wynnsort$presetNameInput = null;
+        wynnsort$editingPresetIndex = -1;
+    }
+
+    @Unique
+    private void wynnsort$cancelPresetEdit() {
+        if (wynnsort$presetNameInput != null) {
+            this.removeWidget(wynnsort$presetNameInput);
+            wynnsort$presetNameInput = null;
+        }
+        wynnsort$editingPresetIndex = -1;
+    }
+
+    @Unique
+    private void wynnsort$cyclePresets() {
+        if (!WynnSortConfig.INSTANCE.searchPresetsEnabled) return;
+        if (SearchPresetStore.size() == 0) {
+            if (this.minecraft != null && this.minecraft.player != null) {
+                this.minecraft.player.displayClientMessage(
+                        Component.literal("[WynnSort] No presets saved"), true);
+            }
+            return;
+        }
+        int startIdx = wynnsort$activePresetIndex + 1;
+        for (int attempt = 0; attempt < WYNNSORT$PRESET_COUNT; attempt++) {
+            int idx = (startIdx + attempt) % WYNNSORT$PRESET_COUNT;
+            SearchPreset preset = SearchPresetStore.getPreset(idx);
+            if (preset != null) {
+                wynnsort$applyPreset(idx, preset);
+                return;
+            }
+        }
     }
 
     @Unique
     private void wynnsort$setScaleMode(boolean useWeighted) {
         WynnSortConfig.INSTANCE.useWeightedScale = useWeighted;
         WynnSortConfig.save();
-
-        if (wynnsort$noriButton != null) {
-            wynnsort$noriButton.setMessage(
-                    Component.literal(useWeighted ? "[Nori]" : "Nori"));
-        }
-        if (wynnsort$overallButton != null) {
-            wynnsort$overallButton.setMessage(
-                    Component.literal(useWeighted ? "Overall" : "[Overall]"));
-        }
-
+        if (wynnsort$noriButton != null) wynnsort$noriButton.setMessage(Component.literal(useWeighted ? "[Nori]" : "Nori"));
+        if (wynnsort$overallButton != null) wynnsort$overallButton.setMessage(Component.literal(useWeighted ? "Overall" : "[Overall]"));
         if (this.minecraft != null && this.minecraft.player != null) {
-            String mode = useWeighted ? "Nori/Wynnpool weighted" : "Overall average";
             this.minecraft.player.displayClientMessage(
-                    Component.literal("[WynnSort] Scale: " + mode), true);
+                    Component.literal("[WynnSort] Scale: " + (useWeighted ? "Nori/Wynnpool weighted" : "Overall average")), true);
         }
     }
 
@@ -140,7 +252,7 @@ public abstract class ContainerScreenMixin extends Screen {
         if (wynnsort$statInput == null) return;
         String text = wynnsort$statInput.getValue();
         if (text == null || text.isEmpty() || text.contains(">") || text.contains("<") || text.contains(",")) {
-            wynnsort$statInput.setTextColor(0xFFFFFFFF); // white for empty, filter-mode, or multi-stat
+            wynnsort$statInput.setTextColor(0xFFFFFFFF);
             return;
         }
         String target = text.toLowerCase().trim();
@@ -156,53 +268,38 @@ public abstract class ContainerScreenMixin extends Screen {
                 if (instOpt.isEmpty()) continue;
                 for (StatActualValue actual : instOpt.get().identifications()) {
                     if (ScoreComputation.statMatches(actual, target)) {
-                        wynnsort$statInput.setTextColor(0xFFFFFFFF); // valid — white
+                        wynnsort$statInput.setTextColor(0xFFFFFFFF);
                         return;
                     }
                 }
             } catch (Exception ignored) {}
         }
-        wynnsort$statInput.setTextColor(0xFFFF5555); // no match — red
+        wynnsort$statInput.setTextColor(0xFFFF5555);
     }
 
-    /**
-     * Lazily builds stat filter boxes once container items are loaded.
-     */
     @Unique
     private void wynnsort$buildStatFilters() {
-        // Detect container switch (title changed) and reset stat boxes
         String currentTitle = this.getTitle().getString();
         if (wynnsort$statsBuilt && wynnsort$lastContainerTitle != null
                 && !wynnsort$lastContainerTitle.equals(currentTitle)) {
-            for (EditBox box : wynnsort$statBoxes) {
-                this.removeWidget(box);
-            }
+            for (EditBox box : wynnsort$statBoxes) this.removeWidget(box);
             wynnsort$statBoxes.clear();
             wynnsort$statNames.clear();
             wynnsort$statsBuilt = false;
             wynnsort$lastContainerTitle = currentTitle;
         }
-
         if (wynnsort$statsBuilt) return;
         if (!WynnSortConfig.INSTANCE.overlayEnabled) return;
-
         AbstractContainerScreen<?> screen = (AbstractContainerScreen<?>) (Object) this;
         List<String> stats = StatPickerHelper.getAvailableStats(screen);
         if (stats.isEmpty()) return;
-
         wynnsort$statsBuilt = true;
         wynnsort$statNames.addAll(stats);
-
         int x = leftPos + imageWidth + 8;
-        int baseY = topPos + 40; // below search bar + scale buttons
+        int baseY = WynnSortConfig.INSTANCE.searchPresetsEnabled ? topPos + 58 : topPos + 40;
         int maxRows = Math.min(stats.size(), WYNNSORT$MAX_STAT_ROWS);
-
         for (int i = 0; i < maxRows; i++) {
-            EditBox box = new EditBox(
-                    this.font,
-                    x + 90, baseY + i * 16,
-                    30, 14,
-                    Component.literal(stats.get(i)));
+            EditBox box = new EditBox(this.font, x + 90, baseY + i * 16, 30, 14, Component.literal(stats.get(i)));
             box.setMaxLength(3);
             box.setHint(Component.literal("%"));
             box.setResponder(text -> wynnsort$syncFiltersFromBoxes());
@@ -211,9 +308,6 @@ public abstract class ContainerScreenMixin extends Screen {
         }
     }
 
-    /**
-     * Constructs a filter string from all stat boxes and updates the filter state.
-     */
     @Unique
     private void wynnsort$syncFiltersFromBoxes() {
         StringBuilder sb = new StringBuilder();
@@ -230,7 +324,6 @@ public abstract class ContainerScreenMixin extends Screen {
         String filter = sb.toString();
         SortState.setRawInput(filter);
         if (wynnsort$statInput != null) {
-            // Temporarily remove responder to avoid feedback loop
             wynnsort$statInput.setResponder(t -> {});
             wynnsort$statInput.setValue(filter);
             wynnsort$statInput.setResponder(text -> {
@@ -244,12 +337,10 @@ public abstract class ContainerScreenMixin extends Screen {
         WynnSortConfig.save();
     }
 
-    /**
-     * Checks if any stat filter box is focused.
-     */
     @Unique
     private boolean wynnsort$isAnyInputFocused() {
         if (wynnsort$statInput != null && wynnsort$statInput.isFocused()) return true;
+        if (wynnsort$presetNameInput != null && wynnsort$presetNameInput.isFocused()) return true;
         for (EditBox box : wynnsort$statBoxes) {
             if (box.isFocused()) return true;
         }
@@ -259,66 +350,99 @@ public abstract class ContainerScreenMixin extends Screen {
     @Inject(method = "render", at = @At("RETURN"))
     private void wynnsort$onRender(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick, CallbackInfo ci) {
         if (!WynnSortConfig.INSTANCE.overlayEnabled) return;
-
-        // Lazily build stat filter boxes once items are loaded
         wynnsort$buildStatFilters();
-
-        // Draw stat name labels next to each filter box
         if (wynnsort$statsBuilt) {
             int x = leftPos + imageWidth + 8;
-            int baseY = topPos + 40;
+            int baseY = WynnSortConfig.INSTANCE.searchPresetsEnabled ? topPos + 58 : topPos + 40;
             int maxRows = Math.min(wynnsort$statNames.size(), wynnsort$statBoxes.size());
-
             for (int i = 0; i < maxRows; i++) {
                 String name = wynnsort$statNames.get(i);
-                // Truncate long names to fit
                 if (this.font.width(name) > 85) {
-                    while (this.font.width(name + "..") > 85 && name.length() > 1) {
-                        name = name.substring(0, name.length() - 1);
-                    }
+                    while (this.font.width(name + "..") > 85 && name.length() > 1) name = name.substring(0, name.length() - 1);
                     name = name + "..";
                 }
                 guiGraphics.drawString(this.font, name, x, baseY + i * 16 + 3, 0xFFCCCCCC);
+            }
+        }
+        if (WynnSortConfig.INSTANCE.searchPresetsEnabled) {
+            for (int i = 0; i < wynnsort$presetButtons.size(); i++) {
+                Button btn = wynnsort$presetButtons.get(i);
+                if (btn.isHoveredOrFocused() && mouseX >= btn.getX() && mouseX <= btn.getX() + btn.getWidth()
+                        && mouseY >= btn.getY() && mouseY <= btn.getY() + btn.getHeight()) {
+                    SearchPreset preset = SearchPresetStore.getPreset(i);
+                    List<Component> tooltipLines = new ArrayList<>();
+                    if (preset != null) {
+                        tooltipLines.add(Component.literal(preset.name != null ? preset.name : "Preset " + (i + 1)));
+                        if (preset.query != null && !preset.query.isEmpty())
+                            tooltipLines.add(Component.literal("Query: " + preset.query).withStyle(s -> s.withColor(0xAAAAAA)));
+                        tooltipLines.add(Component.literal("Click to apply").withStyle(s -> s.withColor(0x55FF55)));
+                        tooltipLines.add(Component.literal("Right-click to overwrite").withStyle(s -> s.withColor(0xFFAA00)));
+                    } else {
+                        tooltipLines.add(Component.literal("Empty Preset " + (i + 1)));
+                        tooltipLines.add(Component.literal("Click to save current filter").withStyle(s -> s.withColor(0x55FF55)));
+                    }
+                    guiGraphics.renderTooltip(this.font, tooltipLines, Optional.empty(), mouseX, mouseY);
+                }
+            }
+            if (wynnsort$presetNameInput != null && wynnsort$editingPresetIndex >= 0) {
+                guiGraphics.drawString(this.font, "Name:", leftPos + imageWidth + 8 - 30, topPos + 59, 0xFFCCCCCC);
+            }
+        }
+    }
+
+    @Inject(method = "mouseClicked", at = @At("HEAD"), cancellable = true)
+    private void wynnsort$onMouseClicked(double mouseX, double mouseY, int button, CallbackInfoReturnable<Boolean> cir) {
+        if (button == 1 && WynnSortConfig.INSTANCE.searchPresetsEnabled) {
+            for (int i = 0; i < wynnsort$presetButtons.size(); i++) {
+                Button presetBtn = wynnsort$presetButtons.get(i);
+                if (mouseX >= presetBtn.getX() && mouseX <= presetBtn.getX() + presetBtn.getWidth()
+                        && mouseY >= presetBtn.getY() && mouseY <= presetBtn.getY() + presetBtn.getHeight()) {
+                    wynnsort$saveCurrentAsPreset(i);
+                    cir.setReturnValue(true);
+                    return;
+                }
             }
         }
     }
 
     @Inject(method = "keyPressed", at = @At("HEAD"), cancellable = true)
     private void wynnsort$onKeyPressed(int keyCode, int scanCode, int modifiers, CallbackInfoReturnable<Boolean> cir) {
-        // J key toggles overlay (keybinds don't fire while screens are open)
-        if (keyCode == GLFW.GLFW_KEY_J && !wynnsort$isAnyInputFocused()) {
-            WynnSortConfig.INSTANCE.overlayEnabled = !WynnSortConfig.INSTANCE.overlayEnabled;
-            WynnSortConfig.save();
-
-            if (this.minecraft != null && this.minecraft.player != null) {
-                String state = WynnSortConfig.INSTANCE.overlayEnabled ? "ON" : "OFF";
-                this.minecraft.player.displayClientMessage(
-                        Component.literal("[WynnSort] Overlay: " + state), true);
+        if (wynnsort$presetNameInput != null && wynnsort$presetNameInput.isFocused()) {
+            if (keyCode == GLFW.GLFW_KEY_ENTER || keyCode == GLFW.GLFW_KEY_KP_ENTER) {
+                wynnsort$confirmPresetSave();
+                cir.setReturnValue(true);
+                return;
             }
-
-            // Re-init so widgets appear/disappear
-            if (this.minecraft != null) {
-                this.resize(this.minecraft, this.width, this.height);
+            if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
+                wynnsort$cancelPresetEdit();
+                cir.setReturnValue(true);
+                return;
             }
-
+            wynnsort$presetNameInput.keyPressed(keyCode, scanCode, modifiers);
             cir.setReturnValue(true);
             return;
         }
-
-        // When any input is focused, capture keys (except Escape)
+        if (keyCode == GLFW.GLFW_KEY_J && !wynnsort$isAnyInputFocused()) {
+            WynnSortConfig.INSTANCE.overlayEnabled = !WynnSortConfig.INSTANCE.overlayEnabled;
+            WynnSortConfig.save();
+            if (this.minecraft != null && this.minecraft.player != null) {
+                this.minecraft.player.displayClientMessage(
+                        Component.literal("[WynnSort] Overlay: " + (WynnSortConfig.INSTANCE.overlayEnabled ? "ON" : "OFF")), true);
+            }
+            if (this.minecraft != null) this.resize(this.minecraft, this.width, this.height);
+            cir.setReturnValue(true);
+            return;
+        }
+        if (keyCode == GLFW.GLFW_KEY_P && !wynnsort$isAnyInputFocused()) {
+            wynnsort$cyclePresets();
+            cir.setReturnValue(true);
+            return;
+        }
         if (wynnsort$isAnyInputFocused()) {
-            if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
-                return;
-            }
-            // Forward to the focused widget
-            if (wynnsort$statInput != null && wynnsort$statInput.isFocused()) {
-                wynnsort$statInput.keyPressed(keyCode, scanCode, modifiers);
-            }
+            if (keyCode == GLFW.GLFW_KEY_ESCAPE) return;
+            if (wynnsort$statInput != null && wynnsort$statInput.isFocused()) wynnsort$statInput.keyPressed(keyCode, scanCode, modifiers);
             for (EditBox box : wynnsort$statBoxes) {
-                if (box.isFocused()) {
-                    box.keyPressed(keyCode, scanCode, modifiers);
-                    break;
-                }
+                if (box.isFocused()) { box.keyPressed(keyCode, scanCode, modifiers); break; }
             }
             cir.setReturnValue(true);
         }
