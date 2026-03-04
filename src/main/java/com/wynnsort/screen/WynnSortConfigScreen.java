@@ -6,6 +6,7 @@ import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
+import net.minecraft.util.Mth;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -23,6 +24,10 @@ public class WynnSortConfigScreen extends Screen {
     private final List<int[]> headerPositions = new ArrayList<>();
     private final List<int[]> labelPositions = new ArrayList<>();
 
+    // Scrolling
+    private int scrollOffset = 0;
+    private int contentHeight = 0;
+
     public WynnSortConfigScreen(Screen parent) {
         super(Component.literal("WynnSort Settings"));
         this.parent = parent;
@@ -38,7 +43,7 @@ public class WynnSortConfigScreen extends Screen {
         int btnW = 200;
         int btnH = 20;
         int spacing = 24;
-        int y = 30;
+        int y = 30 - scrollOffset;
 
         // --- Quality Overlay ---
         headerPositions.add(new int[]{left, y});
@@ -98,13 +103,17 @@ public class WynnSortConfigScreen extends Screen {
                 v -> WynnSortConfig.INSTANCE.dryStreakEnabled = v, centerX, y, btnW, btnH);
         y += spacing;
 
-        // --- Market Price Cache ---
+        // --- Market & Pricing ---
         y += 4;
         headerPositions.add(new int[]{left, y});
         y += 14;
 
         addToggle("Market Price Cache", WynnSortConfig.INSTANCE.marketPriceCacheEnabled,
                 v -> WynnSortConfig.INSTANCE.marketPriceCacheEnabled = v, centerX, y, btnW, btnH);
+        y += spacing;
+
+        addToggle("Price History Tracking", WynnSortConfig.INSTANCE.priceHistoryEnabled,
+                v -> WynnSortConfig.INSTANCE.priceHistoryEnabled = v, centerX, y, btnW, btnH);
         y += spacing;
 
         // --- Crowdsource Data ---
@@ -116,7 +125,7 @@ public class WynnSortConfigScreen extends Screen {
                 v -> WynnSortConfig.INSTANCE.crowdsourceEnabled = v, centerX, y, btnW, btnH);
         y += spacing;
 
-        // --- Trade History ---
+        // --- Trade History & Logging ---
         y += 4;
         headerPositions.add(new int[]{left, y});
         y += 14;
@@ -165,8 +174,12 @@ public class WynnSortConfigScreen extends Screen {
             } catch (NumberFormatException ignored) {}
         });
         addRenderableWidget(taxPercentBox);
+        y += spacing;
 
-        // Done button
+        // Track total content height for scroll clamping
+        contentHeight = y + scrollOffset;
+
+        // Done button — always at bottom, never scrolls
         addRenderableWidget(Button.builder(Component.literal("Done"), btn -> {
             WynnSortConfig.save();
             minecraft.setScreen(parent);
@@ -185,16 +198,24 @@ public class WynnSortConfigScreen extends Screen {
     }
 
     @Override
+    public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
+        int maxScroll = Math.max(0, contentHeight - (this.height - 40));
+        scrollOffset = Mth.clamp(scrollOffset - (int) (verticalAmount * 16), 0, maxScroll);
+        rebuildWidgets();
+        return true;
+    }
+
+    @Override
     public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
         super.render(guiGraphics, mouseX, mouseY, partialTick);
 
         int centerX = this.width / 2;
 
-        // Title
+        // Title (fixed, doesn't scroll)
         guiGraphics.drawCenteredString(this.font, this.title, centerX, 10, 0xFFFFFF);
 
         // Section headers
-        String[] headers = {"Quality Overlay", "Trade Market", "Lootrun", "Market Price Cache", "Crowdsource Data", "Trade History"};
+        String[] headers = {"Quality Overlay", "Trade Market", "Lootrun", "Market & Pricing", "Crowdsource Data", "Trade History & Logging"};
         for (int i = 0; i < headerPositions.size() && i < headers.length; i++) {
             int[] pos = headerPositions.get(i);
             guiGraphics.drawString(this.font, headers[i], pos[0], pos[1], COLOR_HEADER);
@@ -205,6 +226,13 @@ public class WynnSortConfigScreen extends Screen {
         for (int i = 0; i < labelPositions.size() && i < labels.length; i++) {
             int[] pos = labelPositions.get(i);
             guiGraphics.drawString(this.font, labels[i], pos[0], pos[1], COLOR_LABEL);
+        }
+
+        // Scroll indicator
+        int maxScroll = Math.max(0, contentHeight - (this.height - 40));
+        if (maxScroll > 0) {
+            String scrollHint = scrollOffset < maxScroll ? "Scroll for more..." : "Scroll up for more...";
+            guiGraphics.drawCenteredString(this.font, scrollHint, centerX, this.height - 42, 0xFF888888);
         }
     }
 

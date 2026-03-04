@@ -199,6 +199,10 @@ public class WynnSortMod implements ClientModInitializer {
                     logError("[WynnSort] Failed to open diagnostics screen", e);
                 }
             }
+            // Consume preset cycling clicks — actual cycling is handled by ContainerScreenMixin.keyPressed()
+            while (cyclePresetsKey.consumeClick()) {
+                // Handled in-screen by the mixin; consume here to prevent queue buildup
+            }
         });
 
         // Register lootrun beacon HUD overlay
