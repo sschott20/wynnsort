@@ -48,8 +48,11 @@ public class CrowdsourceQueue {
      * @return list of all queued entries (may be empty, never null)
      */
     public List<CrowdsourceEntry> drain() {
-        List<CrowdsourceEntry> result = new ArrayList<>(entries);
-        entries.removeAll(result);
+        List<CrowdsourceEntry> result = new ArrayList<>();
+        entries.removeIf(entry -> {
+            result.add(entry);
+            return true;
+        });
         return result;
     }
 

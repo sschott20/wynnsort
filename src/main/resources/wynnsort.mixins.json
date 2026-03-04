@@ -6,7 +6,8 @@
     "mixins": [],
     "client": [
         "WynntilsModMixin",
-        "ContainerScreenMixin"
+        "ContainerScreenMixin",
+        "TradeMarketScreenMixin"
     ],
     "injectors": {
         "defaultRequire": 1

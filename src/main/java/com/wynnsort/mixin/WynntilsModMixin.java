@@ -5,8 +5,10 @@ import com.wynnsort.feature.DryStreakTracker;
 import com.wynnsort.feature.ItemComparisonFeature;
 import com.wynnsort.feature.LootrunHistoryFeature;
 import com.wynnsort.feature.LootrunSessionStats;
+import com.wynnsort.feature.BestItemHighlightFeature;
 import com.wynnsort.feature.MarketPriceFeature;
 import com.wynnsort.feature.QualityOverlayFeature;
+import com.wynnsort.feature.TooltipFeature;
 import com.wynnsort.feature.TradeMarketLogger;
 import com.wynnsort.market.CrowdsourceCollector;
 import com.wynnsort.util.DiagnosticLog;
@@ -38,7 +40,9 @@ public class WynntilsModMixin {
         WynntilsMod.registerEventListener(DryStreakTracker.INSTANCE);
         WynntilsMod.registerEventListener(CrowdsourceCollector.INSTANCE);
         WynntilsMod.registerEventListener(ItemComparisonFeature.INSTANCE);
+        WynntilsMod.registerEventListener(BestItemHighlightFeature.INSTANCE);
+        WynntilsMod.registerEventListener(TooltipFeature.INSTANCE);
         WynnSortMod.log("WynnSort registered on the Wynntils event bus");
-        DiagnosticLog.event(DiagnosticLog.Category.STARTUP, "wynntils_registered", Map.of("features", 8));
+        DiagnosticLog.event(DiagnosticLog.Category.STARTUP, "wynntils_registered", Map.of("features", 10));
     }
 }
