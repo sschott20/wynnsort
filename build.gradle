@@ -1,0 +1,63 @@
+plugins {
+    id 'fabric-loom' version '1.9-SNAPSHOT'
+    id 'java'
+}
+
+version = project.mod_version
+group = project.maven_group
+
+base {
+    archivesName = project.archives_base_name
+}
+
+repositories {
+    maven { url = "https://maven.neoforged.net/releases" }
+    maven { url = "https://maven.terraformersmc.com/releases/" }
+}
+
+loom {
+    accessWidenerPath = file("src/main/resources/wynnsort.accesswidener")
+}
+
+dependencies {
+    minecraft "com.mojang:minecraft:${project.minecraft_version}"
+    mappings loom.officialMojangMappings()
+    modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
+
+    // Fabric API (for keybinding registration and screen events)
+    modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
+
+    // Wynntils - compile only (users install separately)
+    // Download the JAR from https://github.com/Wynntils/Wynntils/releases/tag/v3.4.5
+    // and place it in the libs/ directory as:
+    //   wynntils-3.4.5-fabric+MC-1.21.4.jar
+    modCompileOnly(files("libs/wynntils-3.4.5-fabric+MC-1.21.4.jar"))
+
+    // ModMenu - optional, provides config screen button in mod list
+    modCompileOnly("com.terraformersmc:modmenu:13.0.3")
+
+    // NeoForge EventBus - needed at compile time for @SubscribeEvent
+    // At runtime, Wynntils bundles this
+    compileOnly("net.neoforged:bus:8.0.2") {
+        exclude group: "org.ow2.asm"
+        exclude group: "org.apache.logging.log4j"
+        exclude group: "cpw.mods", module: "modlauncher"
+    }
+}
+
+processResources {
+    inputs.property "version", project.version
+    filesMatching("fabric.mod.json") {
+        expand "version": project.version
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.release = 21
+}
+
+java {
+    withSourcesJar()
+    sourceCompatibility = JavaVersion.VERSION_21
+    targetCompatibility = JavaVersion.VERSION_21
+}

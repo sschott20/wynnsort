@@ -1,0 +1,24 @@
+{
+    "schemaVersion": 1,
+    "id": "wynnsort",
+    "version": "${version}",
+    "name": "WynnSort",
+    "description": "Sort and visualize trade market items by identification quality. Adds quality overlays and one-click sorting to Wynntils' trade market screen.",
+    "authors": ["sebal"],
+    "contact": {},
+    "license": "MIT",
+    "environment": "client",
+    "entrypoints": {
+        "client": ["com.wynnsort.WynnSortMod"],
+        "modmenu": ["com.wynnsort.ModMenuIntegration"]
+    },
+    "mixins": ["wynnsort.mixins.json"],
+    "depends": {
+        "fabricloader": ">=0.18.0",
+        "minecraft": "~1.21.4",
+        "fabric-api": "*"
+    },
+    "suggests": {
+        "modmenu": "*"
+    }
+}

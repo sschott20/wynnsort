@@ -1,0 +1,17 @@
+{
+    "key.wynnsort.toggle_overlay": "Toggle Quality Overlay",
+    "key.wynnsort.open_history": "Open Trade History",
+    "key.wynnsort.open_config": "Open WynnSort Config",
+    "category.wynnsort": "WynnSort",
+    "wynnsort.sort.button.overall": "Sort: Overall %",
+    "wynnsort.sort.button.default": "Sort: Default",
+    "wynnsort.sort.tooltip.overall": "Sort items by overall identification quality (highest first)",
+    "wynnsort.sort.tooltip.default": "Reset to default trade market order",
+    "wynnsort.config.title": "WynnSort Settings",
+    "wynnsort.config.overlay_enabled": "Quality Overlay",
+    "wynnsort.config.overlay_enabled.tooltip": "Show colored quality indicators on item slots",
+    "wynnsort.config.show_percentage": "Show Percentage Text",
+    "wynnsort.config.show_percentage.tooltip": "Display quality percentage number on each item",
+    "wynnsort.config.sort_button": "Sort Button",
+    "wynnsort.config.sort_button.tooltip": "Show the quality sort button on the trade market screen"
+}

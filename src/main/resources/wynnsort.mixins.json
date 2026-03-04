@@ -1,0 +1,14 @@
+{
+    "required": true,
+    "minVersion": "0.8",
+    "package": "com.wynnsort.mixin",
+    "compatibilityLevel": "JAVA_21",
+    "mixins": [],
+    "client": [
+        "WynntilsModMixin",
+        "ContainerScreenMixin"
+    ],
+    "injectors": {
+        "defaultRequire": 1
+    }
+}
