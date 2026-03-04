@@ -43,6 +43,8 @@ public class DiagnosticScreen extends Screen {
     private FilterMode filterMode = FilterMode.ALL;
     private boolean autoScroll = true;
     private int scrollOffset = 0;
+    private long lastRefreshTime = 0;
+    private static final long REFRESH_INTERVAL_MS = 500;
 
     private List<DiagnosticEvent> events = new ArrayList<>();
 
@@ -133,8 +135,12 @@ public class DiagnosticScreen extends Screen {
     public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
         super.render(guiGraphics, mouseX, mouseY, partialTick);
 
-        // Refresh events each frame to show new data
-        refreshEvents();
+        // Throttle refreshes to avoid per-frame lock contention
+        long now = System.currentTimeMillis();
+        if (now - lastRefreshTime > REFRESH_INTERVAL_MS) {
+            refreshEvents();
+            lastRefreshTime = now;
+        }
 
         int listTop = HEADER_HEIGHT;
         int listBottom = this.height - FOOTER_HEIGHT;

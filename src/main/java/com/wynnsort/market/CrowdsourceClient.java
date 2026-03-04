@@ -20,6 +20,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Client for crowdsourced market data with two modes:
@@ -52,10 +53,10 @@ public class CrowdsourceClient {
     private final ConcurrentHashMap<String, CommunityPriceData> communityCache = new ConcurrentHashMap<>();
 
     /** Rate limiting: timestamp of last remote request */
-    private volatile long lastRemoteRequestTime = 0;
+    private final AtomicLong lastRemoteRequestTime = new AtomicLong(0);
     private static final long RATE_LIMIT_MS = 30_000; // 30 seconds
 
-    private HttpClient httpClient;
+    private volatile HttpClient httpClient;
 
     private CrowdsourceClient() {}
 
@@ -144,9 +145,11 @@ public class CrowdsourceClient {
         long stalenessMs = WynnSortConfig.INSTANCE.marketPriceStalenessHours * 3_600_000L;
 
         List<CrowdsourceEntry> recent = new ArrayList<>();
-        for (CrowdsourceEntry e : observations) {
-            if ((now - e.timestamp) <= stalenessMs) {
-                recent.add(e);
+        synchronized (observations) {
+            for (CrowdsourceEntry e : observations) {
+                if ((now - e.timestamp) <= stalenessMs) {
+                    recent.add(e);
+                }
             }
         }
 
@@ -191,7 +194,9 @@ public class CrowdsourceClient {
             ConcurrentHashMap<String, List<CrowdsourceEntry>> loaded = GSON.fromJson(reader, LOCAL_DB_TYPE);
             if (loaded != null) {
                 localDb.clear();
-                localDb.putAll(loaded);
+                loaded.forEach((key, list) -> {
+                    localDb.put(key, Collections.synchronizedList(new ArrayList<>(list)));
+                });
             }
         } catch (IOException e) {
             WynnSortMod.logError("[WynnSort] Failed to load crowdsource local DB", e);
@@ -201,8 +206,14 @@ public class CrowdsourceClient {
     private void saveLocalDb() {
         try {
             Files.createDirectories(LOCAL_DATA_PATH.getParent());
+            Map<String, List<CrowdsourceEntry>> snapshot = new HashMap<>();
+            localDb.forEach((key, list) -> {
+                synchronized (list) {
+                    snapshot.put(key, new ArrayList<>(list));
+                }
+            });
             try (Writer writer = Files.newBufferedWriter(LOCAL_DATA_PATH)) {
-                GSON.toJson(localDb, LOCAL_DB_TYPE, writer);
+                GSON.toJson(snapshot, LOCAL_DB_TYPE, writer);
             }
         } catch (IOException e) {
             WynnSortMod.logError("[WynnSort] Failed to save crowdsource local DB", e);
@@ -211,7 +222,7 @@ public class CrowdsourceClient {
 
     // ---- Remote API ----
 
-    private HttpClient getHttpClient() {
+    private synchronized HttpClient getHttpClient() {
         if (httpClient == null) {
             httpClient = HttpClient.newBuilder()
                     .connectTimeout(Duration.ofSeconds(5))
@@ -222,11 +233,11 @@ public class CrowdsourceClient {
 
     private boolean isRateLimited() {
         long now = System.currentTimeMillis();
-        if (now - lastRemoteRequestTime < RATE_LIMIT_MS) {
+        long last = lastRemoteRequestTime.get();
+        if (now - last < RATE_LIMIT_MS) {
             return true;
         }
-        lastRemoteRequestTime = now;
-        return false;
+        return !lastRemoteRequestTime.compareAndSet(last, now);
     }
 
     private void submitToRemote(List<CrowdsourceEntry> entries, String apiUrl) {
@@ -276,16 +287,23 @@ public class CrowdsourceClient {
                     .GET()
                     .build();
 
-            HttpResponse<String> response = getHttpClient().send(request, HttpResponse.BodyHandlers.ofString());
-            if (response.statusCode() >= 200 && response.statusCode() < 300) {
-                CommunityPriceData data = GSON.fromJson(response.body(), CommunityPriceData.class);
-                if (data != null) {
-                    data.fetchedAt = System.currentTimeMillis();
-                    return data;
-                }
-            }
+            getHttpClient().sendAsync(request, HttpResponse.BodyHandlers.ofString())
+                    .thenAccept(response -> {
+                        if (response.statusCode() >= 200 && response.statusCode() < 300) {
+                            CommunityPriceData data = GSON.fromJson(response.body(), CommunityPriceData.class);
+                            if (data != null) {
+                                data.fetchedAt = System.currentTimeMillis();
+                                communityCache.put(itemName, data);
+                            }
+                        }
+                    })
+                    .exceptionally(ex -> {
+                        WynnSortMod.logWarn("[WynnSort] Crowdsource: fetch failed for '{}': {}",
+                                itemName, ex.getMessage());
+                        return null;
+                    });
         } catch (Exception e) {
-            WynnSortMod.logWarn("[WynnSort] Crowdsource: failed to fetch community data for '{}': {}",
+            WynnSortMod.logWarn("[WynnSort] Crowdsource: failed to initiate fetch for '{}': {}",
                     itemName, e.getMessage());
         }
         return null;

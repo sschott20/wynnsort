@@ -13,7 +13,9 @@ import java.lang.reflect.Type;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 public class SearchPresetStore {
 
@@ -23,7 +25,7 @@ public class SearchPresetStore {
     private static final Type LIST_TYPE = new TypeToken<ArrayList<SearchPreset>>() {}.getType();
     private static final int MAX_PRESETS = 10;
 
-    private static final List<SearchPreset> presets = new ArrayList<>();
+    private static final CopyOnWriteArrayList<SearchPreset> presets = new CopyOnWriteArrayList<>();
 
     public static void load() {
         if (Files.exists(STORE_PATH)) {
@@ -53,7 +55,7 @@ public class SearchPresetStore {
     }
 
     public static List<SearchPreset> getPresets() {
-        return presets;
+        return Collections.unmodifiableList(new ArrayList<>(presets));
     }
 
     public static void addPreset(SearchPreset preset) {
