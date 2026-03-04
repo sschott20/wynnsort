@@ -3,6 +3,7 @@ package com.wynnsort.feature;
 import com.wynnsort.SortState;
 import com.wynnsort.StatFilter;
 import com.wynnsort.config.WynnSortConfig;
+import com.wynnsort.util.DiagnosticLog;
 import com.wynnsort.util.ScoreComputation;
 import com.wynntils.core.components.Models;
 import com.wynntils.mc.event.SlotRenderEvent;
@@ -36,6 +37,10 @@ public class QualityOverlayFeature {
     private static final int RANK_GOLD   = 0xFFFFD700;  // #1
     private static final int RANK_SILVER = 0xFFC0C0C0;  // #2
     private static final int RANK_BRONZE = 0xFFCD7F32;  // #3
+
+    // Sampling counter for diagnostic logging (log every Nth score computation)
+    private int diagnosticSampleCounter = 0;
+    private static final int DIAGNOSTIC_SAMPLE_RATE = 50;
 
     // Per-frame rank computation cache
     private long lastFrameCount = -1;
@@ -72,6 +77,17 @@ public class QualityOverlayFeature {
         GearInstance gearInstance = gearInstanceOpt.get();
         float pct = ScoreComputation.computeScore(gearItem, gearInstance, SortState.getFilters());
         if (Float.isNaN(pct) || pct < 0.0f) return;
+
+        // Sampled diagnostic logging (not every frame)
+        diagnosticSampleCounter++;
+        if (diagnosticSampleCounter >= DIAGNOSTIC_SAMPLE_RATE) {
+            diagnosticSampleCounter = 0;
+            try {
+                String itemName = gearItem.getItemInfo().name();
+                DiagnosticLog.event(DiagnosticLog.Category.OVERLAY, "score_computed",
+                        Map.of("item", itemName, "score", Math.round(pct)));
+            } catch (Exception ignored) {}
+        }
 
         GuiGraphics guiGraphics = event.getGuiGraphics();
         int x = slot.x;

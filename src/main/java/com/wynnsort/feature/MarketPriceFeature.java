@@ -2,8 +2,13 @@ package com.wynnsort.feature;
 
 import com.wynnsort.WynnSortMod;
 import com.wynnsort.config.WynnSortConfig;
+import com.wynnsort.market.CrowdsourceClient;
 import com.wynnsort.market.MarketPriceEntry;
 import com.wynnsort.market.MarketPriceStore;
+import com.wynnsort.market.PriceHistoryStore;
+import com.wynnsort.market.PriceStats;
+import com.wynnsort.market.PriceTrend;
+import com.wynnsort.util.DiagnosticLog;
 import com.wynnsort.util.ItemNameHelper;
 import com.wynntils.core.components.Models;
 import com.wynntils.mc.event.ContainerSetContentEvent;
@@ -16,6 +21,7 @@ import net.minecraft.world.item.ItemStack;
 import net.neoforged.bus.api.SubscribeEvent;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 public class MarketPriceFeature {
@@ -71,8 +77,11 @@ public class MarketPriceFeature {
                 }
 
                 MarketPriceStore.record(baseName, priceInfo.price(), now);
+                PriceHistoryStore.record(baseName, priceInfo.price(), now);
                 recorded++;
                 WynnSortMod.log("[WynnSort] MarketPrice: recorded {}={} emeralds", baseName, priceInfo.price());
+                DiagnosticLog.event(DiagnosticLog.Category.TRADE_MARKET, "price_recorded",
+                        Map.of("item", baseName, "price", priceInfo.price()));
             } catch (Exception e) {
                 WynnSortMod.logWarn("[WynnSort] MarketPrice: exception processing item '{}'", stack.getHoverName().getString(), e);
             }
@@ -91,17 +100,73 @@ public class MarketPriceFeature {
         if (baseName == null) return;
 
         MarketPriceEntry entry = MarketPriceStore.getPrice(baseName);
-        if (entry == null) return;
-
-        String priceStr = formatEmeralds(entry.price);
-        String ageStr = formatAge(System.currentTimeMillis() - entry.timestamp);
-        String line = "\u00A77Market: \u00A7e" + priceStr + " \u00A78(" + ageStr + " ago)";
+        if (entry == null && !WynnSortConfig.INSTANCE.crowdsourceEnabled) return;
 
         List<Component> tooltips = event.getTooltips();
-        if (tooltips.size() > 1) {
-            tooltips.add(1, Component.literal(line));
-        } else {
-            tooltips.add(Component.literal(line));
+        int insertIndex = tooltips.size() > 1 ? 1 : tooltips.size();
+        int linesAdded = 0;
+
+        // Build the main price line with optional trend arrow
+        if (entry != null) {
+            String priceStr = formatEmeralds(entry.price);
+            String ageStr = formatAge(System.currentTimeMillis() - entry.timestamp);
+            PriceStats stats = WynnSortConfig.INSTANCE.priceHistoryEnabled
+                    ? PriceHistoryStore.getStats(baseName) : null;
+
+            StringBuilder mainLine = new StringBuilder();
+            mainLine.append("\u00A77Market: \u00A7e").append(priceStr);
+            mainLine.append(" \u00A78(").append(ageStr).append(" ago)");
+
+            if (stats != null && stats.trend() != PriceTrend.UNKNOWN) {
+                mainLine.append(" ");
+                switch (stats.trend()) {
+                    case RISING -> mainLine.append("\u00A7a\u25B2"); // green up arrow
+                    case FALLING -> mainLine.append("\u00A7c\u25BC"); // red down arrow
+                    case STABLE -> mainLine.append("\u00A77\u2500"); // gray dash
+                    default -> {} // UNKNOWN - no arrow
+                }
+            }
+
+            tooltips.add(insertIndex + linesAdded, Component.literal(mainLine.toString()));
+            linesAdded++;
+
+            // Add range line if we have history data
+            if (stats != null && stats.count() > 1) {
+                String minStr = formatEmeralds(stats.min());
+                String maxStr = formatEmeralds(stats.max());
+                String rangeLine = "\u00A77Range: \u00A7f" + minStr + " \u00A77- \u00A7f" + maxStr
+                        + " \u00A78(" + stats.count() + " seen)";
+                tooltips.add(insertIndex + linesAdded, Component.literal(rangeLine));
+                linesAdded++;
+            }
+        }
+
+        // Add crowdsource local aggregation line
+        if (WynnSortConfig.INSTANCE.crowdsourceEnabled) {
+            try {
+                CrowdsourceClient.LocalAggregation localAgg =
+                        CrowdsourceClient.INSTANCE.getLocalAggregation(baseName);
+                if (localAgg != null && localAgg.count > 0) {
+                    String avgStr = formatEmeralds(localAgg.avg);
+                    String localLine = "\u00A77Local avg: \u00A7b" + avgStr
+                            + " \u00A78(" + localAgg.count + " seen)";
+                    tooltips.add(insertIndex + linesAdded, Component.literal(localLine));
+                    linesAdded++;
+                }
+
+                // Add community data line if available
+                CrowdsourceClient.CommunityPriceData community =
+                        CrowdsourceClient.INSTANCE.getCommunityData(baseName);
+                if (community != null && community.listingCount > 0) {
+                    String communityAvgStr = formatEmeralds(community.avgPrice);
+                    String communityLine = "\u00A77Community: \u00A7d" + communityAvgStr
+                            + " avg \u00A78(" + community.listingCount + " listings)";
+                    tooltips.add(insertIndex + linesAdded, Component.literal(communityLine));
+                    linesAdded++;
+                }
+            } catch (Exception e) {
+                // Silently ignore crowdsource tooltip errors
+            }
         }
     }
 

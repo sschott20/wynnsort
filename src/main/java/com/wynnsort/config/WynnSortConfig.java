@@ -30,6 +30,10 @@ public class WynnSortConfig {
     public boolean useWeightedScale = true;
     /** Show orange beacon duration tracker during lootruns */
     public boolean lootrunHudEnabled = true;
+    /** Show lootrun session statistics HUD during active runs */
+    public boolean lootrunStatsHudEnabled = true;
+    /** Record lootrun completion/failure history for analytics */
+    public boolean lootrunHistoryEnabled = true;
     /** Log trade market transactions to disk */
     public boolean tradeHistoryEnabled = true;
     /** Minimum price filter for trade history display (emeralds) */
@@ -38,10 +42,28 @@ public class WynnSortConfig {
     public int tradeMarketBuyTaxPercent = 3;
     /** Verbose trade market logging (logs every state change, container, slot, chat) */
     public boolean tradeMarketLogging = true;
+    /** Track mythic dry streak across lootrun sessions */
+    public boolean dryStreakEnabled = true;
     /** Enable market price caching and tooltip display */
     public boolean marketPriceCacheEnabled = true;
     /** Hours before a cached market price is considered stale */
     public int marketPriceStalenessHours = 168;
+    /** Enable saved search presets with quick-apply buttons */
+    public boolean searchPresetsEnabled = true;
+    /** Enable price history tracking with trend analysis */
+    public boolean priceHistoryEnabled = true;
+    /** Maximum number of days to retain price history entries */
+    public int priceHistoryMaxDays = 30;
+    /** Enable crowdsourced market data collection */
+    public boolean crowdsourceEnabled = true;
+    /** Remote API URL for crowdsource data (empty = local only) */
+    public String crowdsourceApiUrl = "";
+    /** Minutes between crowdsource queue flushes */
+    public int crowdsourceFlushMinutes = 5;
+    /** Enable structured diagnostic logging (JSONL events + in-game viewer) */
+    public boolean diagnosticLoggingEnabled = true;
+    /** Enable item comparison tooltip (hold Shift to compare vs equipped gear) */
+    public boolean itemComparisonEnabled = true;
 
     // --- Persistence ---
 

@@ -56,6 +56,10 @@ public class WynnSortConfigScreen extends Screen {
                 v -> WynnSortConfig.INSTANCE.useWeightedScale = v, centerX, y, btnW, btnH);
         y += spacing;
 
+        addToggle("Item Comparison Tooltip", WynnSortConfig.INSTANCE.itemComparisonEnabled,
+                v -> WynnSortConfig.INSTANCE.itemComparisonEnabled = v, centerX, y, btnW, btnH);
+        y += spacing;
+
         // --- Trade Market ---
         y += 4;
         headerPositions.add(new int[]{left, y});
@@ -69,6 +73,10 @@ public class WynnSortConfigScreen extends Screen {
                 v -> WynnSortConfig.INSTANCE.autoSortCheapest = v, centerX, y, btnW, btnH);
         y += spacing;
 
+        addToggle("Search Presets", WynnSortConfig.INSTANCE.searchPresetsEnabled,
+                v -> WynnSortConfig.INSTANCE.searchPresetsEnabled = v, centerX, y, btnW, btnH);
+        y += spacing;
+
         // --- Lootrun ---
         y += 4;
         headerPositions.add(new int[]{left, y});
@@ -78,6 +86,18 @@ public class WynnSortConfigScreen extends Screen {
                 v -> WynnSortConfig.INSTANCE.lootrunHudEnabled = v, centerX, y, btnW, btnH);
         y += spacing;
 
+        addToggle("Lootrun Stats HUD", WynnSortConfig.INSTANCE.lootrunStatsHudEnabled,
+                v -> WynnSortConfig.INSTANCE.lootrunStatsHudEnabled = v, centerX, y, btnW, btnH);
+        y += spacing;
+
+        addToggle("Lootrun History", WynnSortConfig.INSTANCE.lootrunHistoryEnabled,
+                v -> WynnSortConfig.INSTANCE.lootrunHistoryEnabled = v, centerX, y, btnW, btnH);
+        y += spacing;
+
+        addToggle("Dry Streak Tracker", WynnSortConfig.INSTANCE.dryStreakEnabled,
+                v -> WynnSortConfig.INSTANCE.dryStreakEnabled = v, centerX, y, btnW, btnH);
+        y += spacing;
+
         // --- Market Price Cache ---
         y += 4;
         headerPositions.add(new int[]{left, y});
@@ -85,6 +105,15 @@ public class WynnSortConfigScreen extends Screen {
 
         addToggle("Market Price Cache", WynnSortConfig.INSTANCE.marketPriceCacheEnabled,
                 v -> WynnSortConfig.INSTANCE.marketPriceCacheEnabled = v, centerX, y, btnW, btnH);
+        y += spacing;
+
+        // --- Crowdsource Data ---
+        y += 4;
+        headerPositions.add(new int[]{left, y});
+        y += 14;
+
+        addToggle("Crowdsource Data", WynnSortConfig.INSTANCE.crowdsourceEnabled,
+                v -> WynnSortConfig.INSTANCE.crowdsourceEnabled = v, centerX, y, btnW, btnH);
         y += spacing;
 
         // --- Trade History ---
@@ -98,6 +127,10 @@ public class WynnSortConfigScreen extends Screen {
 
         addToggle("Trade Market Verbose Log", WynnSortConfig.INSTANCE.tradeMarketLogging,
                 v -> WynnSortConfig.INSTANCE.tradeMarketLogging = v, centerX, y, btnW, btnH);
+        y += spacing;
+
+        addToggle("Diagnostic Logging", WynnSortConfig.INSTANCE.diagnosticLoggingEnabled,
+                v -> WynnSortConfig.INSTANCE.diagnosticLoggingEnabled = v, centerX, y, btnW, btnH);
         y += spacing;
 
         // Min price filter — label left, EditBox right
@@ -161,7 +194,7 @@ public class WynnSortConfigScreen extends Screen {
         guiGraphics.drawCenteredString(this.font, this.title, centerX, 10, 0xFFFFFF);
 
         // Section headers
-        String[] headers = {"Quality Overlay", "Trade Market", "Lootrun", "Market Price Cache", "Trade History"};
+        String[] headers = {"Quality Overlay", "Trade Market", "Lootrun", "Market Price Cache", "Crowdsource Data", "Trade History"};
         for (int i = 0; i < headerPositions.size() && i < headers.length; i++) {
             int[] pos = headerPositions.get(i);
             guiGraphics.drawString(this.font, headers[i], pos[0], pos[1], COLOR_HEADER);

@@ -24,13 +24,12 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.ItemStack;
 import net.neoforged.bus.api.SubscribeEvent;
+import com.wynnsort.util.DiagnosticLog;
 import com.wynnsort.util.PersistentLog;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.Comparator;
-import java.util.List;
-import java.util.Optional;
+import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -129,6 +128,9 @@ public class TradeMarketLogger {
             tmLog("[TM] State change: {} -> {}", oldState, newState);
             logApiSnapshot("state-change");
         }
+
+        DiagnosticLog.event(DiagnosticLog.Category.TRADE_MARKET, "state_change",
+                Map.of("from", String.valueOf(oldState), "to", String.valueOf(newState)));
 
         // Clear sell overlay when leaving SELLING state
         if (oldState == TradeMarketState.SELLING && newState != TradeMarketState.SELLING) {
@@ -679,6 +681,9 @@ public class TradeMarketLogger {
                 name, price, TransactionRecord.Type.BUY, "", 1,
                 pendingBaseName, pendingFingerprint));
 
+        DiagnosticLog.event(DiagnosticLog.Category.TRADE_MARKET, "transaction",
+                Map.of("type", "BUY", "item", name, "price", price));
+
         pendingItemName = null;
         pendingPrice = -1;
         pendingBaseName = null;
@@ -739,6 +744,9 @@ public class TradeMarketLogger {
         TransactionStore.addTransaction(new TransactionRecord(
                 name, price, TransactionRecord.Type.SELL, "", 1,
                 baseName, fingerprint));
+
+        DiagnosticLog.event(DiagnosticLog.Category.TRADE_MARKET, "transaction",
+                Map.of("type", "SELL", "item", name, "price", price));
 
         pendingSellItemName = null;
         pendingSellPrice = -1;
