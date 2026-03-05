@@ -61,10 +61,6 @@ public class WynnSortConfigScreen extends Screen {
                 v -> WynnSortConfig.INSTANCE.useWeightedScale = v, centerX, y, btnW, btnH);
         y += spacing;
 
-        addToggle("Item Comparison Tooltip", WynnSortConfig.INSTANCE.itemComparisonEnabled,
-                v -> WynnSortConfig.INSTANCE.itemComparisonEnabled = v, centerX, y, btnW, btnH);
-        y += spacing;
-
         // --- Trade Market ---
         y += 4;
         headerPositions.add(new int[]{left, y});
