@@ -30,3 +30,14 @@ com/
 
 # Fabric
 remappedSrc/
+
+# Claude/AI agent files
+.claude/
+CLAUDE.md
+
+# Local research & documentation (not for GitHub)
+ARCHITECTURE.md
+wynntils-api-reference.md
+wynncraft-knowledge.md
+wynncraft-mod-research.md
+bugs.txt
