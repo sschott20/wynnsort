@@ -41,7 +41,6 @@ public class WynnSortMod implements ClientModInitializer {
 
     /** Log to both SLF4J (latest.log) and persistent file (wynnsort.log). */
     public static void log(String message, Object... args) {
-        LOGGER.info(message, args);
         PersistentLog.info(message, args);
     }
 
