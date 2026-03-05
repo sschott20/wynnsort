@@ -211,8 +211,9 @@ public class LootrunSessionStats implements HudRenderCallback {
                 if (currentChallenges > lastChallengesCurrent) {
                     int delta = currentChallenges - lastChallengesCurrent;
                     currentSession.challengesCompleted = currentChallenges;
-                    LOG.info("Challenges updated: {} -> {} (+{})",
-                            lastChallengesCurrent, currentChallenges, delta);
+                    currentSession.pullsEarned += delta;  // 1 pull per challenge completed
+                    LOG.info("Challenges updated: {} -> {} (+{}, pulls now {})",
+                            lastChallengesCurrent, currentChallenges, delta, currentSession.pullsEarned);
                 }
                 lastChallengesCurrent = currentChallenges;
             }
@@ -257,6 +258,16 @@ public class LootrunSessionStats implements HudRenderCallback {
 
                 String colorName = lastBeacon != null ? lastBeacon.name() : "UNKNOWN";
                 currentSession.recordBeacon(colorName, vibrant);
+
+                // Purple beacons give +1 pull, dark gray gives +3 pulls
+                if (lastBeacon == LootrunBeaconKind.PURPLE) {
+                    currentSession.pullsEarned += 1;
+                    LOG.info("Purple beacon: +1 pull (pulls now {})", currentSession.pullsEarned);
+                } else if (lastBeacon == LootrunBeaconKind.DARK_GRAY) {
+                    currentSession.pullsEarned += 3;
+                    LOG.info("Dark gray beacon: +3 pulls (pulls now {})", currentSession.pullsEarned);
+                }
+
                 LOG.info("Beacon selected: {} (vibrant={}), total beacons: {}",
                         colorName, vibrant, currentSession.beaconsSelected);
             } catch (Exception e) {

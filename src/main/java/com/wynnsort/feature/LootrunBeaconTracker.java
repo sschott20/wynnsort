@@ -8,13 +8,14 @@ import com.wynnsort.util.DiagnosticLog;
 import com.wynnsort.util.FeatureLogger;
 import com.wynntils.core.components.Models;
 import com.wynntils.models.lootrun.beacons.LootrunBeaconKind;
+import com.wynntils.models.lootrun.event.LootrunFinishedEvent;
 import com.wynntils.models.lootrun.type.LootrunningState;
-import com.wynntils.utils.colors.CustomColor;
 import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
+import net.neoforged.bus.api.SubscribeEvent;
 
 import java.io.IOException;
 import java.io.Reader;
@@ -179,16 +180,14 @@ public class LootrunBeaconTracker implements HudRenderCallback {
                     lastState, currentState, orangeBeacons, beaconCounts, bootstrapped);
         }
 
-        // Clear on lootrun end
+        // Lootrun state went to NOT_RUNNING (e.g. /class relog, disconnect)
+        // Don't clear state — just save it so it can be restored within 30 minutes.
+        // Actual run completion (LootrunFinishedEvent) handles the real cleanup.
         if (currentState == LootrunningState.NOT_RUNNING) {
             if (lastState != LootrunningState.NOT_RUNNING) {
-                LOG.info("Lootrun ended (was {}), clearing all", lastState);
-                DiagnosticLog.event(DiagnosticLog.Category.LOOTRUN, "run_completed",
-                        Map.of("orangeBeacons", orangeBeacons.size(),
-                                "rainbowRemaining", rainbowRemaining,
-                                "totalChoices", beaconChoiceLog.size()));
-                clearAll();
-                deleteStateFile();
+                LOG.info("State -> NOT_RUNNING (was {}), preserving state for potential relog",
+                        lastState);
+                saveState();
             }
             lastState = currentState;
             return;
@@ -232,6 +231,30 @@ public class LootrunBeaconTracker implements HudRenderCallback {
         if (hasActiveBeaconData()) {
             renderOverlay(guiGraphics, mc);
         }
+    }
+
+    // ── Wynntils Event Handlers (run completion) ────────────────────────
+
+    @SubscribeEvent
+    public void onLootrunCompleted(LootrunFinishedEvent.Completed event) {
+        LOG.info("LootrunFinishedEvent.Completed — clearing all beacon state");
+        DiagnosticLog.event(DiagnosticLog.Category.LOOTRUN, "run_completed",
+                Map.of("orangeBeacons", orangeBeacons.size(),
+                        "rainbowRemaining", rainbowRemaining,
+                        "totalChoices", beaconChoiceLog.size()));
+        clearAll();
+        deleteStateFile();
+    }
+
+    @SubscribeEvent
+    public void onLootrunFailed(LootrunFinishedEvent.Failed event) {
+        LOG.info("LootrunFinishedEvent.Failed — clearing all beacon state");
+        DiagnosticLog.event(DiagnosticLog.Category.LOOTRUN, "run_failed",
+                Map.of("orangeBeacons", orangeBeacons.size(),
+                        "rainbowRemaining", rainbowRemaining,
+                        "totalChoices", beaconChoiceLog.size()));
+        clearAll();
+        deleteStateFile();
     }
 
     /** Returns true if there is any beacon data worth displaying. */
@@ -637,7 +660,7 @@ public class LootrunBeaconTracker implements HudRenderCallback {
 
         // Background
         guiGraphics.fill(x - 2, y - 2, x + boxWidth, y + boxHeight, 0x80000000);
-        guiGraphics.drawString(mc.font, "Lootrun Beacons", x, y, COLOR_HEADER);
+        guiGraphics.drawString(mc.font, "Beacons", x, y, COLOR_HEADER);
         y += headerHeight;
 
         // Render each line
@@ -659,24 +682,17 @@ public class LootrunBeaconTracker implements HudRenderCallback {
     }
 
     /**
-     * Builds the list of HUD lines to display, ordered by importance:
-     * 1. Rainbow (duration-based, most impactful)
-     * 2. Orange beacons (duration-based)
-     * 3. Count-based beacons in a consistent order
+     * Builds the list of HUD lines to display.
+     * Only shows info that Wynntils does NOT already display:
+     * 1. Orange beacons — per-beacon challenge countdown (core value)
+     * 2. Rainbow — remaining challenges until effect ends
+     * 3. Gray — mission count (max 3/run)
+     * 4. Crimson — trial count (max 2/run)
      */
     private List<HudLine> buildHudLines() {
         List<HudLine> lines = new ArrayList<>();
 
-        // Rainbow - duration based
-        if (rainbowRemaining >= 0) {
-            String vibrantMark = isVibrantFromLog(LootrunBeaconKind.RAINBOW) ? "\u2605" : "";
-            String text = rainbowRemaining > 0
-                    ? vibrantMark + "Rainbow: +" + rainbowRemaining + " challenges"
-                    : vibrantMark + "Rainbow: active";
-            lines.add(new HudLine(text, BEACON_COLORS.get(LootrunBeaconKind.RAINBOW)));
-        }
-
-        // Orange beacons - duration based, sorted descending
+        // Orange beacons - per-beacon countdown, sorted descending
         if (!orangeBeacons.isEmpty()) {
             List<Integer> sorted = new ArrayList<>(orangeBeacons);
             sorted.sort((a, b) -> {
@@ -686,58 +702,42 @@ public class LootrunBeaconTracker implements HudRenderCallback {
                 return Integer.compare(b, a);
             });
 
-            for (int count : sorted) {
+            for (int i = 0; i < sorted.size(); i++) {
+                int count = sorted.get(i);
                 int color = getCountColor(count);
-                String text = count < 0 ? "Orange: active" : "Orange: +" + count + " challenges";
+                String label = sorted.size() > 1
+                        ? "Orange #" + (i + 1) + ": "
+                        : "Orange: ";
+                String text = count < 0
+                        ? label + "active"
+                        : label + count + " left";
                 lines.add(new HudLine(text, color));
             }
         }
 
-        // Count-based beacons in display order
-        LootrunBeaconKind[] countOrder = {
-                LootrunBeaconKind.PURPLE,
-                LootrunBeaconKind.BLUE,
-                LootrunBeaconKind.YELLOW,
-                LootrunBeaconKind.CRIMSON,
-                LootrunBeaconKind.AQUA,
-                LootrunBeaconKind.GREEN,
-                LootrunBeaconKind.RED,
-                LootrunBeaconKind.GRAY,
-                LootrunBeaconKind.DARK_GRAY,
-                LootrunBeaconKind.WHITE,
-        };
+        // Rainbow - remaining challenges
+        if (rainbowRemaining >= 0) {
+            String text = rainbowRemaining > 0
+                    ? "Rainbow: " + rainbowRemaining + " left"
+                    : "Rainbow: active";
+            lines.add(new HudLine(text, BEACON_COLORS.get(LootrunBeaconKind.RAINBOW)));
+        }
 
-        for (LootrunBeaconKind kind : countOrder) {
-            int count = getBeaconCount(kind);
-            if (count <= 0) continue;
+        // Gray (missions) - max 3 per run
+        int grayCount = getBeaconCount(LootrunBeaconKind.GRAY);
+        if (grayCount > 0) {
+            lines.add(new HudLine("Gray: " + grayCount + "/3 missions",
+                    BEACON_COLORS.get(LootrunBeaconKind.GRAY)));
+        }
 
-            String vibrantMark = isVibrantFromLog(kind) ? "\u2605" : "";
-            String name = BEACON_NAMES.getOrDefault(kind, kind.name());
-            int color = BEACON_COLORS.getOrDefault(kind, 0xFFAAAAAA);
-            String text = formatBeaconLine(kind, name, count, vibrantMark);
-            lines.add(new HudLine(text, color));
+        // Crimson (trials) - max 2 per run
+        int crimsonCount = getBeaconCount(LootrunBeaconKind.CRIMSON);
+        if (crimsonCount > 0) {
+            lines.add(new HudLine("Crimson: " + crimsonCount + "/2 trials",
+                    BEACON_COLORS.get(LootrunBeaconKind.CRIMSON)));
         }
 
         return lines;
-    }
-
-    /**
-     * Format a count-based beacon line with type-specific descriptions.
-     */
-    private String formatBeaconLine(LootrunBeaconKind kind, String name, int count, String vibrantMark) {
-        return switch (kind) {
-            case BLUE -> vibrantMark + name + ": " + count + " boons";
-            case PURPLE -> vibrantMark + name + ": " + count + "x (+%d pulls)".formatted(count);
-            case YELLOW -> vibrantMark + name + ": " + count + " chests";
-            case CRIMSON -> vibrantMark + name + ": " + count + " trials";
-            case AQUA -> vibrantMark + name + ": " + count + "x boosts";
-            case GREEN -> vibrantMark + name + ": " + count + "x used";
-            case DARK_GRAY -> vibrantMark + name + ": used (+3c +3p)";
-            case WHITE -> vibrantMark + name + ": used (+5 chall.)";
-            case GRAY -> vibrantMark + name + ": " + count + " missions";
-            case RED -> vibrantMark + name + ": " + count + "x used";
-            default -> vibrantMark + name + ": " + count + "x";
-        };
     }
 
     /**
