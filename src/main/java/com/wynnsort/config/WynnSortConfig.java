@@ -41,7 +41,7 @@ public class WynnSortConfig {
     /** Minimum price filter for trade history display (emeralds) */
     public long tradeHistoryMinPriceFilter = 5000;
     /** Trade market buyer tax percentage (applied to BUY display prices) */
-    public int tradeMarketBuyTaxPercent = 3;
+    public int tradeMarketBuyTaxPercent = 5;
     /** Verbose trade market logging (logs every state change, container, slot, chat) */
     public boolean tradeMarketLogging = true;
     /** Track mythic dry streak across lootrun sessions */

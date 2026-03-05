@@ -3,15 +3,12 @@ package com.wynnsort.util;
 import com.wynnsort.SortState;
 import com.wynnsort.StatFilter;
 import com.wynnsort.config.WynnSortConfig;
-import com.wynntils.core.components.Services;
 import com.wynntils.models.gear.type.GearInfo;
 import com.wynntils.models.gear.type.GearInstance;
-import com.wynntils.models.gear.type.ItemWeightSource;
 import com.wynntils.models.items.items.game.GearItem;
 import com.wynntils.models.stats.StatCalculator;
 import com.wynntils.models.stats.type.StatActualValue;
 import com.wynntils.models.stats.type.StatPossibleValues;
-import com.wynntils.services.itemweight.type.ItemWeighting;
 
 import java.util.List;
 
@@ -53,19 +50,10 @@ public final class ScoreComputation {
      */
     public static float getWeightedScore(GearItem gearItem) {
         try {
-            String itemName = gearItem.getItemInfo().name();
-
-            for (ItemWeightSource source : new ItemWeightSource[]{
-                    ItemWeightSource.WYNNPOOL, ItemWeightSource.NORI}) {
-                List<ItemWeighting> weightings =
-                        Services.ItemWeight.getItemWeighting(itemName, source);
-                if (!weightings.isEmpty()) {
-                    return Services.ItemWeight.calculateWeighting(
-                            weightings.get(0), gearItem);
-                }
-            }
-        } catch (Exception e) {
-            // Weight data may not be loaded yet
+            return WeightedScoreHelper.compute(gearItem);
+        } catch (Throwable t) {
+            // WeightedScoreHelper may fail to load if Wynntils version
+            // doesn't have ItemWeight APIs
         }
         return Float.NaN;
     }

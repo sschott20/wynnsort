@@ -28,6 +28,7 @@ public class TooltipFeature {
 
     private static final FeatureLogger LOG = new FeatureLogger("Tooltip", DiagnosticLog.Category.TOOLTIP);
     private boolean firstTooltipLogged = false;
+    private boolean scoreComputationBroken = false;
 
     private TooltipFeature() {}
 
@@ -37,6 +38,7 @@ public class TooltipFeature {
             if (!WynnSortConfig.INSTANCE.overlayEnabled) {
                 return;
             }
+            if (scoreComputationBroken) return;
 
             ItemStack itemStack = event.getItemStack();
             if (itemStack.isEmpty()) {
@@ -91,8 +93,11 @@ public class TooltipFeature {
                         "item", itemName, "score", Math.round(result.percentage),
                         "label", result.label));
             }
-        } catch (Exception e) {
-            LOG.error("Error in tooltip render", e);
+        } catch (Exception | NoClassDefFoundError e) {
+            if (!scoreComputationBroken) {
+                LOG.error("ScoreComputation failed in tooltip, disabling until restart: {}", e.getMessage());
+                scoreComputationBroken = true;
+            }
         }
     }
 

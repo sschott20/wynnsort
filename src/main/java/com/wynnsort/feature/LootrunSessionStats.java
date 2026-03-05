@@ -259,13 +259,17 @@ public class LootrunSessionStats implements HudRenderCallback {
                 String colorName = lastBeacon != null ? lastBeacon.name() : "UNKNOWN";
                 currentSession.recordBeacon(colorName, vibrant);
 
-                // Purple beacons give +1 pull, dark gray gives +3 pulls
+                // Purple beacons give +1 pull (+2 if vibrant), dark gray gives +3 (+6 if vibrant)
                 if (lastBeacon == LootrunBeaconKind.PURPLE) {
-                    currentSession.pullsEarned += 1;
-                    LOG.info("Purple beacon: +1 pull (pulls now {})", currentSession.pullsEarned);
+                    int pulls = vibrant ? 2 : 1;
+                    currentSession.pullsEarned += pulls;
+                    LOG.info("Purple beacon{}: +{} pull(s) (pulls now {})",
+                            vibrant ? " (vibrant)" : "", pulls, currentSession.pullsEarned);
                 } else if (lastBeacon == LootrunBeaconKind.DARK_GRAY) {
-                    currentSession.pullsEarned += 3;
-                    LOG.info("Dark gray beacon: +3 pulls (pulls now {})", currentSession.pullsEarned);
+                    int pulls = vibrant ? 6 : 3;
+                    currentSession.pullsEarned += pulls;
+                    LOG.info("Dark gray beacon{}: +{} pulls (pulls now {})",
+                            vibrant ? " (vibrant)" : "", pulls, currentSession.pullsEarned);
                 }
 
                 LOG.info("Beacon selected: {} (vibrant={}), total beacons: {}",

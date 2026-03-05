@@ -701,17 +701,54 @@ public class LootrunBeaconTracker implements HudRenderCallback {
     }
 
     /**
+     * Computes effective pull/curse/time/challenge values from the beacon choice log,
+     * accounting for vibrant doubling and aqua multipliers.
+     */
+    private BeaconEffectSummary computeEffectSummary() {
+        BeaconEffectSummary summary = new BeaconEffectSummary();
+        for (BeaconChoice choice : beaconChoiceLog) {
+            LootrunBeaconKind kind;
+            try {
+                kind = LootrunBeaconKind.valueOf(choice.beaconType);
+            } catch (IllegalArgumentException e) {
+                continue;
+            }
+            int vibrantMul = choice.vibrant ? 2 : 1;
+            switch (kind) {
+                case PURPLE -> {
+                    summary.effectivePulls += 1 * vibrantMul;
+                    summary.effectiveCurses += 1 * vibrantMul;
+                }
+                case DARK_GRAY -> {
+                    summary.effectivePulls += 3 * vibrantMul;
+                    summary.effectiveCurses += 3 * vibrantMul;
+                }
+                case GREEN -> summary.effectiveTimeBonus += 120 * vibrantMul;
+                case WHITE -> summary.effectiveChallenges += 5 * vibrantMul;
+                case RED -> summary.effectiveRedChallenges += 3 * vibrantMul;
+                default -> {}
+            }
+        }
+        return summary;
+    }
+
+    private static class BeaconEffectSummary {
+        int effectivePulls = 0;
+        int effectiveCurses = 0;
+        int effectiveTimeBonus = 0;
+        int effectiveChallenges = 0;
+        int effectiveRedChallenges = 0;
+    }
+
+    /**
      * Builds the list of HUD lines to display.
-     * Only shows info that Wynntils does NOT already display:
-     * 1. Orange beacons — per-beacon challenge countdown (core value)
-     * 2. Rainbow — remaining challenges until effect ends
-     * 3. Gray — mission count (max 3/run)
-     * 4. Crimson — trial count (max 2/run)
+     * Shows beacon counts with effective values, max-use indicators, and trade-off notes.
      */
     private List<HudLine> buildHudLines() {
         List<HudLine> lines = new ArrayList<>();
+        BeaconEffectSummary summary = computeEffectSummary();
 
-        // Orange beacons - per-beacon countdown, sorted descending
+        // Orange beacons - per-beacon countdown with "+1 choice" label
         if (!orangeBeacons.isEmpty()) {
             List<Integer> sorted = new ArrayList<>(orangeBeacons);
             sorted.sort((a, b) -> {
@@ -728,8 +765,8 @@ public class LootrunBeaconTracker implements HudRenderCallback {
                         ? "Orange #" + (i + 1) + ": "
                         : "Orange: ";
                 String text = count < 0
-                        ? label + "active"
-                        : label + count + " left";
+                        ? label + "active (+1 choice)"
+                        : label + count + " chall. left (+1 choice)";
                 lines.add(new HudLine(text, color));
             }
         }
@@ -742,10 +779,68 @@ public class LootrunBeaconTracker implements HudRenderCallback {
             lines.add(new HudLine(text, BEACON_COLORS.get(LootrunBeaconKind.RAINBOW)));
         }
 
+        // Purple - pulls/curses with effective values
+        int purpleCount = getBeaconCount(LootrunBeaconKind.PURPLE);
+        if (purpleCount > 0) {
+            String text = "Purple: " + purpleCount + "x (+" + summary.effectivePulls + "p +"
+                    + summary.effectiveCurses + "c)";
+            lines.add(new HudLine(text, BEACON_COLORS.get(LootrunBeaconKind.PURPLE)));
+        }
+
+        // Dark Grey - max 1/run with effective values
+        int darkGrayCount = getBeaconCount(LootrunBeaconKind.DARK_GRAY);
+        if (darkGrayCount > 0) {
+            String text = "Dark Grey: " + darkGrayCount + "/1 (+" + summary.effectivePulls
+                    + "p +" + summary.effectiveCurses + "c)";
+            lines.add(new HudLine(text, BEACON_COLORS.get(LootrunBeaconKind.DARK_GRAY)));
+        }
+
+        // White - max 1/run with effective challenges
+        int whiteCount = getBeaconCount(LootrunBeaconKind.WHITE);
+        if (whiteCount > 0) {
+            String text = "White: " + whiteCount + "/1 (+" + summary.effectiveChallenges + " chall)";
+            lines.add(new HudLine(text, BEACON_COLORS.get(LootrunBeaconKind.WHITE)));
+        }
+
+        // Green - cumulative time bonus
+        int greenCount = getBeaconCount(LootrunBeaconKind.GREEN);
+        if (greenCount > 0) {
+            String text = "Green: " + greenCount + "x (+" + summary.effectiveTimeBonus + "s)";
+            lines.add(new HudLine(text, BEACON_COLORS.get(LootrunBeaconKind.GREEN)));
+        }
+
+        // Red - challenges added, no time trade-off
+        int redCount = getBeaconCount(LootrunBeaconKind.RED);
+        if (redCount > 0) {
+            String text = "Red: " + redCount + "x (+" + summary.effectiveRedChallenges + " chall, no time)";
+            lines.add(new HudLine(text, BEACON_COLORS.get(LootrunBeaconKind.RED)));
+        }
+
+        // Blue - boon count
+        int blueCount = getBeaconCount(LootrunBeaconKind.BLUE);
+        if (blueCount > 0) {
+            lines.add(new HudLine("Blue: " + blueCount + " boons",
+                    BEACON_COLORS.get(LootrunBeaconKind.BLUE)));
+        }
+
+        // Yellow - chest count
+        int yellowCount = getBeaconCount(LootrunBeaconKind.YELLOW);
+        if (yellowCount > 0) {
+            lines.add(new HudLine("Yellow: " + yellowCount + " chests",
+                    BEACON_COLORS.get(LootrunBeaconKind.YELLOW)));
+        }
+
+        // Aqua - boost count
+        int aquaCount = getBeaconCount(LootrunBeaconKind.AQUA);
+        if (aquaCount > 0) {
+            lines.add(new HudLine("Aqua: " + aquaCount + " boosts",
+                    BEACON_COLORS.get(LootrunBeaconKind.AQUA)));
+        }
+
         // Gray (missions) - max 3 per run
         int grayCount = getBeaconCount(LootrunBeaconKind.GRAY);
         if (grayCount > 0) {
-            lines.add(new HudLine("Gray: " + grayCount + "/3 missions",
+            lines.add(new HudLine("Grey: " + grayCount + "/3 missions",
                     BEACON_COLORS.get(LootrunBeaconKind.GRAY)));
         }
 
