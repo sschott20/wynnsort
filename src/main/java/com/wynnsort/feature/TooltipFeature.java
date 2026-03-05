@@ -71,13 +71,14 @@ public class TooltipFeature {
             String colorCode = getColorCode(result.percentage);
             String line = "\u00A76WynnSort: " + colorCode + Math.round(result.percentage) + "% \u00A77(" + result.label + ")";
 
-            List<Component> tooltips = event.getTooltips();
+            List<Component> tooltips = new java.util.ArrayList<>(event.getTooltips());
             // Insert after the first line (item name) if possible, otherwise append
             if (tooltips.size() > 1) {
                 tooltips.add(1, Component.literal(line));
             } else {
                 tooltips.add(Component.literal(line));
             }
+            event.setTooltips(tooltips);
 
             // Log first successful tooltip injection per session (exploratory)
             if (!firstTooltipLogged) {

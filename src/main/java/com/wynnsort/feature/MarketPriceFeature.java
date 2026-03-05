@@ -106,7 +106,7 @@ public class MarketPriceFeature {
         MarketPriceEntry entry = MarketPriceStore.getPrice(baseName);
         if (entry == null && !WynnSortConfig.INSTANCE.crowdsourceEnabled) return;
 
-        List<Component> tooltips = event.getTooltips();
+        List<Component> tooltips = new java.util.ArrayList<>(event.getTooltips());
         int insertIndex = tooltips.size() > 1 ? 1 : tooltips.size();
         int linesAdded = 0;
 
@@ -171,6 +171,10 @@ public class MarketPriceFeature {
             } catch (Exception e) {
                 LOG.warn("Crowdsource tooltip error: {}", e.getMessage());
             }
+        }
+
+        if (linesAdded > 0) {
+            event.setTooltips(tooltips);
         }
     }
 

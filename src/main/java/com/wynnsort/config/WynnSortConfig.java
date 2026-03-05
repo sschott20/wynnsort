@@ -28,7 +28,6 @@ public class WynnSortConfig {
     public boolean showPercentageText = true;
     public boolean sortButtonEnabled = true;
     public String lastFilter = "";
-    public boolean autoSortCheapest = true;
     /** true = use Nori/Wynnpool weighted scale, false = use default overall % */
     public boolean useWeightedScale = true;
     /** Show orange beacon duration tracker during lootruns */
@@ -65,7 +64,6 @@ public class WynnSortConfig {
     public int crowdsourceFlushMinutes = 5;
     /** Enable structured diagnostic logging (JSONL events + in-game viewer) */
     public boolean diagnosticLoggingEnabled = true;
-
     // --- Persistence ---
 
     public static void load() {

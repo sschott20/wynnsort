@@ -70,10 +70,6 @@ public class WynnSortConfigScreen extends Screen {
                 v -> WynnSortConfig.INSTANCE.sortButtonEnabled = v, centerX, y, btnW, btnH);
         y += spacing;
 
-        addToggle("Auto-Sort Cheapest", WynnSortConfig.INSTANCE.autoSortCheapest,
-                v -> WynnSortConfig.INSTANCE.autoSortCheapest = v, centerX, y, btnW, btnH);
-        y += spacing;
-
         addToggle("Search Presets", WynnSortConfig.INSTANCE.searchPresetsEnabled,
                 v -> WynnSortConfig.INSTANCE.searchPresetsEnabled = v, centerX, y, btnW, btnH);
         y += spacing;
