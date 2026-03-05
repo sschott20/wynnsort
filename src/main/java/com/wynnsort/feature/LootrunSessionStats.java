@@ -63,12 +63,11 @@ public class LootrunSessionStats implements HudRenderCallback {
     private int lastSacrifices = 0;
 
     /**
-     * Number of upcoming challenge completions whose pull reward is doubled by aqua beacon.
-     * Aqua beacon doubles ALL rewards from the next challenge, so completing a challenge
-     * while this counter is > 0 gives 2 pulls instead of 1.
-     * Normal aqua: 1 challenge doubled. Vibrant aqua: 2 challenges doubled.
+     * Multiplier for the next beacon's effects from aqua beacon.
+     * Normal aqua: 2x, Vibrant aqua: 3x. Stacks multiplicatively.
+     * Resets to 1 after the next non-aqua beacon is selected.
      */
-    private int pendingAquaChallenges = 0;
+    private int pendingAquaMultiplier = 1;
 
 
     private LootrunSessionStats() {}
@@ -171,7 +170,7 @@ public class LootrunSessionStats implements HudRenderCallback {
             lastChallengesCurrent = 0;
             lastRerolls = 0;
             lastSacrifices = 0;
-            pendingAquaChallenges = 0;
+            pendingAquaMultiplier = 1;
             LOG.event("session_started", Map.of("state", currentState.name()));
         }
 
@@ -221,23 +220,10 @@ public class LootrunSessionStats implements HudRenderCallback {
                     int delta = currentChallenges - lastChallengesCurrent;
                     currentSession.challengesCompleted = currentChallenges;
 
-                    // Each challenge gives 1 pull, but aqua beacon doubles the reward.
-                    // pendingAquaChallenges tracks how many upcoming challenges are boosted.
-                    int pullsFromChallenges = 0;
-                    for (int i = 0; i < delta; i++) {
-                        if (pendingAquaChallenges > 0) {
-                            pullsFromChallenges += 2;  // aqua doubles: 1 pull * 2 = 2 pulls
-                            pendingAquaChallenges--;
-                            LOG.info("Aqua-boosted challenge completion: 2 pulls (remaining aqua charges: {})",
-                                    pendingAquaChallenges);
-                        } else {
-                            pullsFromChallenges += 1;  // normal: 1 pull per challenge
-                        }
-                    }
-                    currentSession.pullsEarned += pullsFromChallenges;
-                    LOG.info("Challenges updated: {} -> {} (+{}, +{} pulls, pulls now {})",
+                    currentSession.pullsEarned += delta;  // 1 pull per challenge
+                    LOG.info("Challenges updated: {} -> {} (+{} pulls, pulls now {})",
                             lastChallengesCurrent, currentChallenges, delta,
-                            pullsFromChallenges, currentSession.pullsEarned);
+                            currentSession.pullsEarned);
                 }
                 lastChallengesCurrent = currentChallenges;
             }
@@ -283,24 +269,40 @@ public class LootrunSessionStats implements HudRenderCallback {
                 String colorName = lastBeacon != null ? lastBeacon.name() : "UNKNOWN";
                 currentSession.recordBeacon(colorName, vibrant);
 
-                // Purple beacons give +1 pull (+2 if vibrant), dark gray gives +3 (+6 if vibrant)
-                if (lastBeacon == LootrunBeaconKind.PURPLE) {
-                    int pulls = vibrant ? 2 : 1;
-                    currentSession.pullsEarned += pulls;
-                    LOG.info("Purple beacon{}: +{} pull(s) (pulls now {})",
-                            vibrant ? " (vibrant)" : "", pulls, currentSession.pullsEarned);
-                } else if (lastBeacon == LootrunBeaconKind.DARK_GRAY) {
-                    int pulls = vibrant ? 6 : 3;
-                    currentSession.pullsEarned += pulls;
-                    LOG.info("Dark gray beacon{}: +{} pulls (pulls now {})",
-                            vibrant ? " (vibrant)" : "", pulls, currentSession.pullsEarned);
-                } else if (lastBeacon == LootrunBeaconKind.AQUA) {
-                    // Aqua beacon doubles ALL rewards from the next challenge completion.
-                    // Normal aqua: next 1 challenge doubled. Vibrant aqua: next 2 challenges doubled.
-                    int aquaCharges = vibrant ? 2 : 1;
-                    pendingAquaChallenges += aquaCharges;
-                    LOG.info("Aqua beacon{}: +{} aqua charge(s) (pending aqua challenges now {})",
-                            vibrant ? " (vibrant)" : "", aquaCharges, pendingAquaChallenges);
+                // Aqua boosts the NEXT beacon's effects (2x normal, 3x vibrant).
+                // Must be checked first so the multiplier is set before a pull-giving beacon.
+                if (lastBeacon == LootrunBeaconKind.AQUA) {
+                    int mul = vibrant ? 3 : 2;
+                    pendingAquaMultiplier *= mul;
+                    LOG.info("Aqua beacon{}: next beacon {}x (pending multiplier now {}x)",
+                            vibrant ? " (vibrant)" : "", mul, pendingAquaMultiplier);
+                } else {
+                    // Apply aqua multiplier to pull-giving beacons, then reset
+                    int aquaMul = pendingAquaMultiplier;
+
+                    if (lastBeacon == LootrunBeaconKind.PURPLE) {
+                        int basePulls = vibrant ? 2 : 1;
+                        int pulls = basePulls * aquaMul;
+                        currentSession.pullsEarned += pulls;
+                        LOG.info("Purple beacon{}{}: +{} pull(s) (pulls now {})",
+                                vibrant ? " (vibrant)" : "",
+                                aquaMul > 1 ? " (aqua " + aquaMul + "x)" : "",
+                                pulls, currentSession.pullsEarned);
+                    } else if (lastBeacon == LootrunBeaconKind.DARK_GRAY) {
+                        int basePulls = vibrant ? 6 : 3;
+                        int pulls = basePulls * aquaMul;
+                        currentSession.pullsEarned += pulls;
+                        LOG.info("Dark gray beacon{}{}: +{} pulls (pulls now {})",
+                                vibrant ? " (vibrant)" : "",
+                                aquaMul > 1 ? " (aqua " + aquaMul + "x)" : "",
+                                pulls, currentSession.pullsEarned);
+                    }
+
+                    // Reset aqua multiplier after any non-aqua beacon
+                    if (aquaMul > 1) {
+                        LOG.info("Aqua multiplier consumed (was {}x)", aquaMul);
+                    }
+                    pendingAquaMultiplier = 1;
                 }
 
                 LOG.info("Beacon selected: {} (vibrant={}), total beacons: {}",
