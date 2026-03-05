@@ -321,23 +321,27 @@ public class DryStreakTracker implements HudRenderCallback {
         java.util.List<Integer> colors = new java.util.ArrayList<>();
 
         // Regular chest dry streak (from Wynntils LootChest model)
-        int dryChests = getWynntilsDryChestCount();
-        int dryItems = getWynntilsDryItemCount();
+        if (WynnSortConfig.INSTANCE.showDryChests) {
+            int dryChests = getWynntilsDryChestCount();
+            int dryItems = getWynntilsDryItemCount();
 
-        if (dryChests >= 0) {
-            String chestLine = "Dry: " + dryChests + " chests";
-            if (dryItems >= 0) {
-                chestLine += " | " + dryItems + " items";
+            if (dryChests >= 0) {
+                String chestLine = "Dry: " + dryChests + " chests";
+                if (dryItems >= 0) {
+                    chestLine += " | " + dryItems + " items";
+                }
+                lines.add(chestLine);
+                colors.add(getDryStreakColor(dryChests));
             }
-            lines.add(chestLine);
-            colors.add(getDryStreakColor(dryChests));
         }
 
         // Reward pull dry streak (our own tracking)
-        long dryPulls = data.totalPullsWithoutMythic;
-        if (dryPulls > 0) {
-            lines.add("Pulls: " + dryPulls + " dry");
-            colors.add(getDryStreakColor(dryPulls));
+        if (WynnSortConfig.INSTANCE.showDryPulls) {
+            long dryPulls = data.totalPullsWithoutMythic;
+            if (dryPulls > 0) {
+                lines.add("Pulls: " + dryPulls + " dry");
+                colors.add(getDryStreakColor(dryPulls));
+            }
         }
 
         if (lines.isEmpty()) return;
@@ -350,9 +354,13 @@ public class DryStreakTracker implements HudRenderCallback {
         int boxWidth = maxWidth + padding * 2;
         int boxHeight = lines.size() * lineHeight + padding * 2 - 2;
 
-        // Position: bottom-right, above hotbar
-        int x = screenWidth - boxWidth - 4;
-        int y = screenHeight - boxHeight - 50;
+        // Use configured position or default (bottom-right, above hotbar)
+        float cfgX = WynnSortConfig.INSTANCE.dryStreakHudX;
+        float cfgY = WynnSortConfig.INSTANCE.dryStreakHudY;
+        int x = cfgX >= 0 ? (int) (cfgX * screenWidth) : screenWidth - boxWidth - 4;
+        int y = cfgY >= 0 ? (int) (cfgY * screenHeight) : screenHeight - boxHeight - 50;
+        x = Math.max(0, Math.min(x, screenWidth - boxWidth));
+        y = Math.max(0, Math.min(y, screenHeight - boxHeight));
 
         // Background
         guiGraphics.fill(x - 2, y - 2, x + boxWidth, y + boxHeight, 0x80000000);

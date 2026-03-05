@@ -328,33 +328,40 @@ public class LootrunSessionStats implements HudRenderCallback {
         int lineHeight = 11;
         int padding = 4;
         int boxWidth = 160;
+        WynnSortConfig cfg = WynnSortConfig.INSTANCE;
 
         // Dry streak data (show if enabled)
-        DryStreakTracker.DryStreakData dryData = WynnSortConfig.INSTANCE.dryStreakEnabled
+        DryStreakTracker.DryStreakData dryData = (cfg.dryStreakEnabled && cfg.showStatsMythicStats)
                 ? DryStreakTracker.INSTANCE.getData() : null;
 
         // Count visible lines
-        int lineCount = 4; // header + challenges + pulls/rerolls + duration
-        if (session.getEffectivePulls() > 0) lineCount++; // mythic chance line
-        if (session.sacrifices > 0) lineCount++;
-        if (!session.beaconCounts.isEmpty()) lineCount++;
+        int lineCount = 1; // header always shown
+        if (cfg.showStatsChallenges) lineCount++;
+        if (cfg.showStatsPullsRerolls) lineCount++;
+        if (cfg.showStatsMythicChance && session.getEffectivePulls() > 0) lineCount++;
+        if (cfg.showStatsSacrifices && session.sacrifices > 0) lineCount++;
+        if (cfg.showStatsBeaconSummary && !session.beaconCounts.isEmpty()) lineCount++;
+        if (cfg.showStatsDuration) lineCount++;
         if (dryData != null) {
             lineCount++; // separator/header
-            if (dryData.totalLifetimePulls > 0) lineCount++; // lifetime
-            if (dryData.totalPullsWithoutMythic > 0) lineCount++; // percentile
-            if (dryData.longestDryStreak > 0) lineCount++; // longest
-            if (dryData.lastMythicName != null && !dryData.lastMythicName.isEmpty()) lineCount++; // last mythic
+            if (dryData.totalLifetimePulls > 0) lineCount++;
+            if (dryData.totalPullsWithoutMythic > 0) lineCount++;
+            if (dryData.longestDryStreak > 0) lineCount++;
+            if (dryData.lastMythicName != null && !dryData.lastMythicName.isEmpty()) lineCount++;
         }
 
         int boxHeight = lineCount * lineHeight + padding * 2;
 
-        // Position on the right side of the screen, below the beacon tracker
         int screenWidth = mc.getWindow().getGuiScaledWidth();
         int screenHeight = mc.getWindow().getGuiScaledHeight();
 
-        // Beacon tracker is on the left at x=4, center-y. We go right side, offset from top.
-        int x = screenWidth - boxWidth - 4;
-        int y = 4;
+        // Use configured position or default (top-right)
+        float cfgX = cfg.sessionStatsHudX;
+        float cfgY = cfg.sessionStatsHudY;
+        int x = cfgX >= 0 ? (int) (cfgX * screenWidth) : screenWidth - boxWidth - 4;
+        int y = cfgY >= 0 ? (int) (cfgY * screenHeight) : 4;
+        x = Math.max(0, Math.min(x, screenWidth - boxWidth));
+        y = Math.max(0, Math.min(y, screenHeight - boxHeight));
 
         // Background
         guiGraphics.fill(x - 2, y - 2, x + boxWidth + 2, y + boxHeight + 2, COLOR_BG);
@@ -368,45 +375,54 @@ public class LootrunSessionStats implements HudRenderCallback {
         textY += lineHeight;
 
         // Challenges
-        String challengeText = "Run: " + session.challengesCompleted + " challenges";
-        guiGraphics.drawString(mc.font, challengeText, x + padding, textY, COLOR_LABEL);
-        textY += lineHeight;
-
-        // Pulls & Rerolls (with effective pulls)
-        int effectivePulls = session.getEffectivePulls();
-        String pullsText = "Pulls: " + session.pullsEarned + " | Rerolls: " + session.rerollsEarned;
-        if (session.rerollsEarned > 0) {
-            pullsText += " (" + effectivePulls + " eff.)";
-        }
-        guiGraphics.drawString(mc.font, pullsText, x + padding, textY, COLOR_LABEL);
-        textY += lineHeight;
-
-        // Mythic chance based on effective pulls
-        if (effectivePulls > 0) {
-            double mythicChance = (1.0 - Math.pow(1.0 - DryStreakTracker.MYTHIC_RATE, effectivePulls)) * 100.0;
-            String mythicText = String.format("Mythic chance: %.1f%%", mythicChance);
-            guiGraphics.drawString(mc.font, mythicText, x + padding, textY, 0xFFFF55FF);
+        if (cfg.showStatsChallenges) {
+            String challengeText = "Run: " + session.challengesCompleted + " challenges";
+            guiGraphics.drawString(mc.font, challengeText, x + padding, textY, COLOR_LABEL);
             textY += lineHeight;
         }
 
+        // Pulls & Rerolls (with effective pulls)
+        if (cfg.showStatsPullsRerolls) {
+            int effectivePulls = session.getEffectivePulls();
+            String pullsText = "Pulls: " + session.pullsEarned + " | Rerolls: " + session.rerollsEarned;
+            if (session.rerollsEarned > 0) {
+                pullsText += " (" + effectivePulls + " eff.)";
+            }
+            guiGraphics.drawString(mc.font, pullsText, x + padding, textY, COLOR_LABEL);
+            textY += lineHeight;
+        }
+
+        // Mythic chance based on effective pulls
+        if (cfg.showStatsMythicChance) {
+            int effectivePulls = session.getEffectivePulls();
+            if (effectivePulls > 0) {
+                double mythicChance = (1.0 - Math.pow(1.0 - DryStreakTracker.MYTHIC_RATE, effectivePulls)) * 100.0;
+                String mythicText = String.format("Mythic chance: %.1f%%", mythicChance);
+                guiGraphics.drawString(mc.font, mythicText, x + padding, textY, 0xFFFF55FF);
+                textY += lineHeight;
+            }
+        }
+
         // Sacrifices (only show if > 0)
-        if (session.sacrifices > 0) {
+        if (cfg.showStatsSacrifices && session.sacrifices > 0) {
             String sacText = "Sacrifices: " + session.sacrifices;
             guiGraphics.drawString(mc.font, sacText, x + padding, textY, COLOR_LABEL);
             textY += lineHeight;
         }
 
         // Beacon summary (only show if beacons were selected)
-        if (!session.beaconCounts.isEmpty()) {
+        if (cfg.showStatsBeaconSummary && !session.beaconCounts.isEmpty()) {
             String beaconText = "Beacons: " + session.getBeaconSummary();
             guiGraphics.drawString(mc.font, beaconText, x + padding, textY, COLOR_BEACON);
             textY += lineHeight;
         }
 
         // Duration
-        String durationText = "Time: " + session.getFormattedDuration();
-        guiGraphics.drawString(mc.font, durationText, x + padding, textY, COLOR_DURATION);
-        textY += lineHeight;
+        if (cfg.showStatsDuration) {
+            String durationText = "Time: " + session.getFormattedDuration();
+            guiGraphics.drawString(mc.font, durationText, x + padding, textY, COLOR_DURATION);
+            textY += lineHeight;
+        }
 
         // Dry streak details (lifetime stats, percentile, etc.)
         if (dryData != null) {

@@ -643,9 +643,16 @@ public class LootrunBeaconTracker implements HudRenderCallback {
         int headerHeight = 14;
         int boxHeight = headerHeight + lines.size() * lineHeight + 2;
 
+        int screenWidth = mc.getWindow().getGuiScaledWidth();
         int screenHeight = mc.getWindow().getGuiScaledHeight();
-        int x = 4;
-        int y = (screenHeight - boxHeight) / 2;
+
+        // Use configured position or default (left, vertically centered)
+        float cfgX = WynnSortConfig.INSTANCE.beaconHudX;
+        float cfgY = WynnSortConfig.INSTANCE.beaconHudY;
+        int x = cfgX >= 0 ? (int) (cfgX * screenWidth) : 4;
+        int y = cfgY >= 0 ? (int) (cfgY * screenHeight) : (screenHeight - boxHeight) / 2;
+        x = Math.max(0, Math.min(x, screenWidth - boxWidth));
+        y = Math.max(0, Math.min(y, screenHeight - boxHeight));
 
         // Background
         guiGraphics.fill(x - 2, y - 2, x + boxWidth, y + boxHeight, 0x80000000);
@@ -678,7 +685,7 @@ public class LootrunBeaconTracker implements HudRenderCallback {
         List<HudLine> lines = new ArrayList<>();
 
         // Orange beacons - just show remaining count per beacon
-        if (!orangeBeacons.isEmpty()) {
+        if (WynnSortConfig.INSTANCE.showBeaconOrange && !orangeBeacons.isEmpty()) {
             List<Integer> sorted = new ArrayList<>(orangeBeacons);
             sorted.sort((a, b) -> {
                 if (a < 0 && b < 0) return 0;
@@ -695,7 +702,7 @@ public class LootrunBeaconTracker implements HudRenderCallback {
         }
 
         // Rainbow
-        if (rainbowRemaining >= 0) {
+        if (WynnSortConfig.INSTANCE.showBeaconRainbow && rainbowRemaining >= 0) {
             String text = rainbowRemaining > 0
                     ? "Rainbow: " + rainbowRemaining
                     : "Rainbow: active";
@@ -703,17 +710,21 @@ public class LootrunBeaconTracker implements HudRenderCallback {
         }
 
         // Gray
-        int grayCount = getBeaconCount(LootrunBeaconKind.GRAY);
-        if (grayCount > 0) {
-            lines.add(new HudLine("Grey: " + grayCount + "/3",
-                    BEACON_COLORS.get(LootrunBeaconKind.GRAY)));
+        if (WynnSortConfig.INSTANCE.showBeaconGrey) {
+            int grayCount = getBeaconCount(LootrunBeaconKind.GRAY);
+            if (grayCount > 0) {
+                lines.add(new HudLine("Grey: " + grayCount + "/3",
+                        BEACON_COLORS.get(LootrunBeaconKind.GRAY)));
+            }
         }
 
         // Crimson
-        int crimsonCount = getBeaconCount(LootrunBeaconKind.CRIMSON);
-        if (crimsonCount > 0) {
-            lines.add(new HudLine("Crimson: " + crimsonCount + "/2",
-                    BEACON_COLORS.get(LootrunBeaconKind.CRIMSON)));
+        if (WynnSortConfig.INSTANCE.showBeaconCrimson) {
+            int crimsonCount = getBeaconCount(LootrunBeaconKind.CRIMSON);
+            if (crimsonCount > 0) {
+                lines.add(new HudLine("Crimson: " + crimsonCount + "/2",
+                        BEACON_COLORS.get(LootrunBeaconKind.CRIMSON)));
+            }
         }
 
         return lines;

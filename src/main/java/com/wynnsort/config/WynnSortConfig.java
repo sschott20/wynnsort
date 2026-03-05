@@ -62,6 +62,44 @@ public class WynnSortConfig {
     public int crowdsourceFlushMinutes = 5;
     /** Enable structured diagnostic logging (JSONL events + in-game viewer) */
     public boolean diagnosticLoggingEnabled = true;
+
+    // --- HUD positions (0.0-1.0 of screen, -1 = use default) ---
+
+    /** Beacon tracker HUD X position (fraction of screen width, -1 = default) */
+    public float beaconHudX = -1;
+    /** Beacon tracker HUD Y position (fraction of screen height, -1 = default) */
+    public float beaconHudY = -1;
+    /** Session stats HUD X position (fraction of screen width, -1 = default) */
+    public float sessionStatsHudX = -1;
+    /** Session stats HUD Y position (fraction of screen height, -1 = default) */
+    public float sessionStatsHudY = -1;
+    /** Dry streak HUD X position (fraction of screen width, -1 = default) */
+    public float dryStreakHudX = -1;
+    /** Dry streak HUD Y position (fraction of screen height, -1 = default) */
+    public float dryStreakHudY = -1;
+
+    // --- HUD display toggles: Beacon Tracker ---
+
+    public boolean showBeaconOrange = true;
+    public boolean showBeaconRainbow = true;
+    public boolean showBeaconGrey = true;
+    public boolean showBeaconCrimson = true;
+
+    // --- HUD display toggles: Session Stats ---
+
+    public boolean showStatsChallenges = true;
+    public boolean showStatsPullsRerolls = true;
+    public boolean showStatsMythicChance = true;
+    public boolean showStatsSacrifices = true;
+    public boolean showStatsBeaconSummary = true;
+    public boolean showStatsDuration = true;
+    public boolean showStatsMythicStats = true;
+
+    // --- HUD display toggles: Dry Streak ---
+
+    public boolean showDryChests = true;
+    public boolean showDryPulls = true;
+
     // --- Validation ---
 
     /**

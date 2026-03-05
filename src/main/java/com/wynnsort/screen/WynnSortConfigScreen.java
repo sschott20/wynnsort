@@ -1,6 +1,7 @@
 package com.wynnsort.screen;
 
 import com.wynnsort.config.WynnSortConfig;
+import com.wynnsort.screen.HudElementSettingsScreen.ToggleEntry;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
@@ -79,20 +80,61 @@ public class WynnSortConfigScreen extends Screen {
         headerPositions.add(new int[]{left, y});
         y += 14;
 
-        addToggle("Lootrun Beacon HUD", WynnSortConfig.INSTANCE.lootrunHudEnabled,
-                v -> WynnSortConfig.INSTANCE.lootrunHudEnabled = v, centerX, y, btnW, btnH);
+        // Edit HUD Layout button (opens drag-and-drop screen)
+        addRenderableWidget(Button.builder(Component.literal("Edit HUD Layout..."), b -> {
+            minecraft.setScreen(new HudPositionScreen(this));
+        }).bounds(centerX - btnW / 2, y, btnW, btnH).build());
         y += spacing;
 
-        addToggle("Lootrun Stats HUD", WynnSortConfig.INSTANCE.lootrunStatsHudEnabled,
-                v -> WynnSortConfig.INSTANCE.lootrunStatsHudEnabled = v, centerX, y, btnW, btnH);
+        // Beacon HUD toggle + settings button
+        addToggleWithSettings("Beacon HUD", WynnSortConfig.INSTANCE.lootrunHudEnabled,
+                v -> WynnSortConfig.INSTANCE.lootrunHudEnabled = v, centerX, y, btnW, btnH,
+                "Beacon Display Settings", List.of(
+                        new ToggleEntry("Orange Countdowns", () -> WynnSortConfig.INSTANCE.showBeaconOrange,
+                                v -> WynnSortConfig.INSTANCE.showBeaconOrange = v),
+                        new ToggleEntry("Rainbow Countdown", () -> WynnSortConfig.INSTANCE.showBeaconRainbow,
+                                v -> WynnSortConfig.INSTANCE.showBeaconRainbow = v),
+                        new ToggleEntry("Grey Missions", () -> WynnSortConfig.INSTANCE.showBeaconGrey,
+                                v -> WynnSortConfig.INSTANCE.showBeaconGrey = v),
+                        new ToggleEntry("Crimson Trials", () -> WynnSortConfig.INSTANCE.showBeaconCrimson,
+                                v -> WynnSortConfig.INSTANCE.showBeaconCrimson = v)
+                ));
+        y += spacing;
+
+        // Stats HUD toggle + settings button
+        addToggleWithSettings("Stats HUD", WynnSortConfig.INSTANCE.lootrunStatsHudEnabled,
+                v -> WynnSortConfig.INSTANCE.lootrunStatsHudEnabled = v, centerX, y, btnW, btnH,
+                "Stats Display Settings", List.of(
+                        new ToggleEntry("Challenges", () -> WynnSortConfig.INSTANCE.showStatsChallenges,
+                                v -> WynnSortConfig.INSTANCE.showStatsChallenges = v),
+                        new ToggleEntry("Pulls / Rerolls", () -> WynnSortConfig.INSTANCE.showStatsPullsRerolls,
+                                v -> WynnSortConfig.INSTANCE.showStatsPullsRerolls = v),
+                        new ToggleEntry("Mythic Chance", () -> WynnSortConfig.INSTANCE.showStatsMythicChance,
+                                v -> WynnSortConfig.INSTANCE.showStatsMythicChance = v),
+                        new ToggleEntry("Sacrifices", () -> WynnSortConfig.INSTANCE.showStatsSacrifices,
+                                v -> WynnSortConfig.INSTANCE.showStatsSacrifices = v),
+                        new ToggleEntry("Beacon Summary", () -> WynnSortConfig.INSTANCE.showStatsBeaconSummary,
+                                v -> WynnSortConfig.INSTANCE.showStatsBeaconSummary = v),
+                        new ToggleEntry("Duration", () -> WynnSortConfig.INSTANCE.showStatsDuration,
+                                v -> WynnSortConfig.INSTANCE.showStatsDuration = v),
+                        new ToggleEntry("Mythic Stats", () -> WynnSortConfig.INSTANCE.showStatsMythicStats,
+                                v -> WynnSortConfig.INSTANCE.showStatsMythicStats = v)
+                ));
         y += spacing;
 
         addToggle("Lootrun History", WynnSortConfig.INSTANCE.lootrunHistoryEnabled,
                 v -> WynnSortConfig.INSTANCE.lootrunHistoryEnabled = v, centerX, y, btnW, btnH);
         y += spacing;
 
-        addToggle("Dry Streak Tracker", WynnSortConfig.INSTANCE.dryStreakEnabled,
-                v -> WynnSortConfig.INSTANCE.dryStreakEnabled = v, centerX, y, btnW, btnH);
+        // Dry Streak toggle + settings button
+        addToggleWithSettings("Dry Streak", WynnSortConfig.INSTANCE.dryStreakEnabled,
+                v -> WynnSortConfig.INSTANCE.dryStreakEnabled = v, centerX, y, btnW, btnH,
+                "Dry Streak Display Settings", List.of(
+                        new ToggleEntry("Dry Chests / Items", () -> WynnSortConfig.INSTANCE.showDryChests,
+                                v -> WynnSortConfig.INSTANCE.showDryChests = v),
+                        new ToggleEntry("Dry Pulls", () -> WynnSortConfig.INSTANCE.showDryPulls,
+                                v -> WynnSortConfig.INSTANCE.showDryPulls = v)
+                ));
         y += spacing;
 
         // --- Market & Pricing ---
@@ -187,6 +229,27 @@ public class WynnSortConfigScreen extends Screen {
             rebuildWidgets();
         }).bounds(centerX - width / 2, y, width, height).build();
         addRenderableWidget(btn);
+    }
+
+    private void addToggleWithSettings(String label, boolean currentValue, java.util.function.Consumer<Boolean> setter,
+                                       int centerX, int y, int totalWidth, int height,
+                                       String settingsTitle, List<ToggleEntry> settingsToggles) {
+        int settingsBtnW = 26;
+        int gap = 2;
+        int toggleW = totalWidth - settingsBtnW - gap;
+
+        String stateText = currentValue ? "ON" : "OFF";
+        int toggleX = centerX - totalWidth / 2;
+
+        addRenderableWidget(Button.builder(Component.literal(label + ": " + stateText), b -> {
+            boolean newVal = !stateText.equals("ON");
+            setter.accept(newVal);
+            rebuildWidgets();
+        }).bounds(toggleX, y, toggleW, height).build());
+
+        addRenderableWidget(Button.builder(Component.literal("..."), b -> {
+            minecraft.setScreen(new HudElementSettingsScreen(this, settingsTitle, settingsToggles));
+        }).bounds(toggleX + toggleW + gap, y, settingsBtnW, height).build());
     }
 
     @Override
