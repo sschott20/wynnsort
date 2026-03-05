@@ -78,7 +78,7 @@ public class WynnSortMod implements ClientModInitializer {
     public void onInitializeClient() {
         PersistentLog.init();
         DiagnosticLog.init();
-        log("WynnSort initializing...");
+        log("[WS:Init] WynnSort initializing...");
 
         WynnSortConfig.load();
         DiagnosticLog.event(DiagnosticLog.Category.STARTUP, "mod_init", Map.of("version", "1.0.0"));
@@ -242,7 +242,7 @@ public class WynnSortMod implements ClientModInitializer {
             });
         });
 
-        log("WynnSort initialized successfully");
+        log("[WS:Init] WynnSort initialized successfully");
     }
 
     private void onToggleOverlay(Minecraft client) {

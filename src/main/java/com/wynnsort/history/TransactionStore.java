@@ -4,6 +4,8 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.reflect.TypeToken;
 import com.wynnsort.WynnSortMod;
+import com.wynnsort.util.DiagnosticLog;
+import com.wynnsort.util.FeatureLogger;
 import net.fabricmc.loader.api.FabricLoader;
 
 import java.io.IOException;
@@ -16,6 +18,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
@@ -25,6 +28,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 public class TransactionStore {
 
+    private static final FeatureLogger LOG = new FeatureLogger("TxStore", DiagnosticLog.Category.PERSISTENCE);
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static final Path STORE_PATH = FabricLoader.getInstance().getConfigDir()
             .resolve("wynnsort").resolve("transactions.json");
@@ -44,10 +48,11 @@ public class TransactionStore {
                 if (loaded != null) {
                     transactions.clear();
                     transactions.addAll(loaded);
-                    WynnSortMod.log("Loaded {} transactions from {}", transactions.size(), STORE_PATH);
+                    LOG.info("Loaded {} transactions from {}", transactions.size(), STORE_PATH);
+                    LOG.event("store_loaded", Map.of("count", transactions.size()));
                 }
             } catch (IOException e) {
-                WynnSortMod.logError("Failed to load transactions", e);
+                LOG.error("Failed to load transactions", e);
             }
         }
 
@@ -71,7 +76,7 @@ public class TransactionStore {
                 String existingName = existing.baseName != null ? existing.baseName : existing.itemName;
                 String recordName = record.baseName != null ? record.baseName : record.itemName;
                 if (existingName != null && existingName.equalsIgnoreCase(recordName)) {
-                    WynnSortMod.logWarn("Skipping duplicate transaction: {} {} for {} emeralds",
+                    LOG.warn("Skipping duplicate transaction: {} {} for {} emeralds",
                             record.type, record.itemName, record.priceEmeralds);
                     return;
                 }
@@ -83,21 +88,21 @@ public class TransactionStore {
             transactions.remove(0);
         }
         dirty.set(true);
-        WynnSortMod.log("Logged transaction: {} {}x {} for {} emeralds",
+        LOG.info("Logged transaction: {} {}x {} for {} emeralds",
                 record.type, record.quantity, record.itemName, record.priceEmeralds);
     }
 
     public static void removeTransaction(TransactionRecord record) {
         if (transactions.remove(record)) {
             dirty.set(true);
-            WynnSortMod.log("Removed transaction: {} {}", record.type, record.itemName);
+            LOG.info("Removed transaction: {} {}", record.type, record.itemName);
         }
     }
 
     public static void clearTransactions() {
         transactions.clear();
         dirty.set(true);
-        WynnSortMod.log("Cleared all transactions");
+        LOG.info("Cleared all transactions");
     }
 
     public static List<TransactionRecord> getTransactions() {
@@ -228,9 +233,10 @@ public class TransactionStore {
             try (Writer writer = Files.newBufferedWriter(STORE_PATH)) {
                 GSON.toJson(transactions, LIST_TYPE, writer);
             }
-            WynnSortMod.log("Saved {} transactions to {}", transactions.size(), STORE_PATH);
+            LOG.info("Saved {} transactions to {}", transactions.size(), STORE_PATH);
+            LOG.event("store_saved", Map.of("count", transactions.size()));
         } catch (IOException e) {
-            WynnSortMod.logError("Failed to save transactions", e);
+            LOG.error("Failed to save transactions", e);
         }
     }
 }

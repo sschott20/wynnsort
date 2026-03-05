@@ -5,6 +5,8 @@ import com.google.gson.GsonBuilder;
 import com.google.gson.reflect.TypeToken;
 import com.wynnsort.WynnSortMod;
 import com.wynnsort.config.WynnSortConfig;
+import com.wynnsort.util.DiagnosticLog;
+import com.wynnsort.util.FeatureLogger;
 import net.fabricmc.loader.api.FabricLoader;
 
 import java.io.IOException;
@@ -19,6 +21,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 public class PriceHistoryStore {
 
+    private static final FeatureLogger LOG = new FeatureLogger("PxHist", DiagnosticLog.Category.PERSISTENCE);
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static final Path STORE_PATH = FabricLoader.getInstance().getConfigDir()
             .resolve("wynnsort").resolve("price_history.json");
@@ -42,10 +45,11 @@ public class PriceHistoryStore {
                     loaded.forEach((key, list) -> {
                         history.put(key, Collections.synchronizedList(new ArrayList<>(list)));
                     });
-                    WynnSortMod.log("Loaded price history for {} items from {}", history.size(), STORE_PATH);
+                    LOG.info("Loaded price history for {} items from {}", history.size(), STORE_PATH);
+                    LOG.event("store_loaded", Map.of("count", history.size()));
                 }
             } catch (IOException e) {
-                WynnSortMod.logError("Failed to load price history", e);
+                LOG.error("Failed to load price history", e);
             }
         }
 
@@ -223,9 +227,10 @@ public class PriceHistoryStore {
             try (Writer writer = Files.newBufferedWriter(STORE_PATH)) {
                 GSON.toJson(snapshot, writer);
             }
-            WynnSortMod.log("Saved price history for {} items to {}", snapshot.size(), STORE_PATH);
+            LOG.info("Saved price history for {} items to {}", snapshot.size(), STORE_PATH);
+            LOG.event("store_saved", Map.of("count", snapshot.size()));
         } catch (IOException e) {
-            WynnSortMod.logError("Failed to save price history", e);
+            LOG.error("Failed to save price history", e);
         }
     }
 }

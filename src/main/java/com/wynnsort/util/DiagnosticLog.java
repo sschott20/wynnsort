@@ -22,7 +22,9 @@ import java.util.concurrent.locks.ReentrantLock;
 public final class DiagnosticLog {
 
     public enum Category {
-        TRADE_MARKET, LOOTRUN, OVERLAY, BEACON, CONFIG, STARTUP, ERROR
+        TRADE_MARKET, LOOTRUN, OVERLAY, BEACON, CONFIG, STARTUP, ERROR,
+        TOOLTIP, COMPARISON, HIGHLIGHT, MARKET_PRICE, CROWDSOURCE,
+        DRY_STREAK, PERSISTENCE, MIXIN
     }
 
     private static final int RING_BUFFER_SIZE = 1000;

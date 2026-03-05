@@ -40,6 +40,8 @@ public abstract class ContainerScreenMixin extends Screen {
     @Shadow protected int topPos;
     @Shadow protected int imageWidth;
 
+    @Unique private static final com.wynnsort.util.FeatureLogger wynnsort$LOG = new com.wynnsort.util.FeatureLogger("Mixin", com.wynnsort.util.DiagnosticLog.Category.MIXIN);
+
     @Unique private EditBox wynnsort$statInput;
     @Unique private Button wynnsort$noriButton;
     @Unique private Button wynnsort$overallButton;
@@ -58,6 +60,7 @@ public abstract class ContainerScreenMixin extends Screen {
     // Preset name editing
     @Unique private EditBox wynnsort$presetNameInput = null;
     @Unique private int wynnsort$editingPresetIndex = -1;
+    @Unique private String wynnsort$lastSyncedFilter = "";
 
     protected ContainerScreenMixin(Component title) {
         super(title);
@@ -130,6 +133,8 @@ public abstract class ContainerScreenMixin extends Screen {
                 this.addRenderableWidget(presetBtn);
             }
         }
+
+        wynnsort$LOG.info("Screen init: overlay={}, presets={}, filter='{}', title='{}', screenClass={}", WynnSortConfig.INSTANCE.overlayEnabled, WynnSortConfig.INSTANCE.searchPresetsEnabled, SortState.getRawInput(), this.getTitle().getString(), this.getClass().getSimpleName());
     }
 
     @Unique
@@ -169,6 +174,7 @@ public abstract class ContainerScreenMixin extends Screen {
             }
         }
         wynnsort$activePresetIndex = index;
+        wynnsort$LOG.info("Preset applied: idx={}, name='{}', query='{}'", index, preset.name, preset.query);
         if (this.minecraft != null && this.minecraft.player != null) {
             String name = preset.name != null ? preset.name : "Preset " + (index + 1);
             this.minecraft.player.displayClientMessage(
@@ -196,6 +202,7 @@ public abstract class ContainerScreenMixin extends Screen {
         if (name.isEmpty()) name = "Preset " + (wynnsort$editingPresetIndex + 1);
         SearchPreset preset = new SearchPreset(name, SortState.getRawInput(), SortState.getSortToken());
         SearchPresetStore.setPreset(wynnsort$editingPresetIndex, preset);
+        wynnsort$LOG.info("Preset saved: idx={}, name='{}'", wynnsort$editingPresetIndex, name);
         if (this.minecraft != null && this.minecraft.player != null) {
             this.minecraft.player.displayClientMessage(
                     Component.literal("[WynnSort] Saved preset " + (wynnsort$editingPresetIndex + 1) + ": " + name), true);
@@ -216,6 +223,7 @@ public abstract class ContainerScreenMixin extends Screen {
 
     @Unique
     private void wynnsort$cyclePresets() {
+        wynnsort$LOG.info("Cycling presets from idx={}", wynnsort$activePresetIndex);
         if (!WynnSortConfig.INSTANCE.searchPresetsEnabled) return;
         if (SearchPresetStore.size() == 0) {
             if (this.minecraft != null && this.minecraft.player != null) {
@@ -237,6 +245,7 @@ public abstract class ContainerScreenMixin extends Screen {
 
     @Unique
     private void wynnsort$setScaleMode(boolean useWeighted) {
+        wynnsort$LOG.info("Scale mode: weighted={}", useWeighted);
         WynnSortConfig.INSTANCE.useWeightedScale = useWeighted;
         WynnSortConfig.save();
         if (wynnsort$noriButton != null) wynnsort$noriButton.setMessage(Component.literal(useWeighted ? "[Nori]" : "Nori"));
@@ -322,6 +331,10 @@ public abstract class ContainerScreenMixin extends Screen {
             }
         }
         String filter = sb.toString();
+        if (!filter.equals(wynnsort$lastSyncedFilter)) {
+            wynnsort$lastSyncedFilter = filter;
+            wynnsort$LOG.info("Stat filters synced: '{}'", filter);
+        }
         SortState.setRawInput(filter);
         if (wynnsort$statInput != null) {
             wynnsort$statInput.setResponder(t -> {});
@@ -430,10 +443,12 @@ public abstract class ContainerScreenMixin extends Screen {
                         Component.literal("[WynnSort] Overlay: " + (WynnSortConfig.INSTANCE.overlayEnabled ? "ON" : "OFF")), true);
             }
             if (this.minecraft != null) this.resize(this.minecraft, this.width, this.height);
+            wynnsort$LOG.info("Key: J -> overlay toggled");
             cir.setReturnValue(true);
             return;
         }
         if (keyCode == GLFW.GLFW_KEY_P && !wynnsort$isAnyInputFocused()) {
+            wynnsort$LOG.info("Key: P -> cycle presets");
             wynnsort$cyclePresets();
             cir.setReturnValue(true);
             return;

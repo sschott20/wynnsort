@@ -4,6 +4,8 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.reflect.TypeToken;
 import com.wynnsort.WynnSortMod;
+import com.wynnsort.util.DiagnosticLog;
+import com.wynnsort.util.FeatureLogger;
 import net.fabricmc.loader.api.FabricLoader;
 
 import java.io.IOException;
@@ -15,6 +17,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -27,6 +30,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 public class LootrunStore {
 
+    private static final FeatureLogger LOG = new FeatureLogger("LRStore", DiagnosticLog.Category.PERSISTENCE);
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static final Path STORE_PATH = FabricLoader.getInstance().getConfigDir()
             .resolve("wynnsort").resolve("lootrun_history.json");
@@ -44,10 +48,11 @@ public class LootrunStore {
                 if (loaded != null) {
                     records.clear();
                     records.addAll(loaded);
-                    WynnSortMod.log("[WynnSort] Loaded {} lootrun records from {}", records.size(), STORE_PATH);
+                    LOG.info("Loaded {} lootrun records from {}", records.size(), STORE_PATH);
+                    LOG.event("store_loaded", Map.of("count", records.size()));
                 }
             } catch (IOException e) {
-                WynnSortMod.logError("[WynnSort] Failed to load lootrun history", e);
+                LOG.error("Failed to load lootrun history", e);
             }
         }
 
@@ -65,7 +70,7 @@ public class LootrunStore {
             records.remove(0);
         }
         dirty.set(true);
-        WynnSortMod.log("[WynnSort] Logged lootrun: completed={}, challenges={}, pulls={}, xp={}",
+        LOG.info("Logged lootrun: completed={}, challenges={}, pulls={}, xp={}",
                 record.completed, record.challengesCompleted, record.pullsEarned, record.xpEarned);
     }
 
@@ -121,9 +126,10 @@ public class LootrunStore {
             try (Writer writer = Files.newBufferedWriter(STORE_PATH)) {
                 GSON.toJson(records, LIST_TYPE, writer);
             }
-            WynnSortMod.log("[WynnSort] Saved {} lootrun records to {}", records.size(), STORE_PATH);
+            LOG.info("Saved {} lootrun records to {}", records.size(), STORE_PATH);
+            LOG.event("store_saved", Map.of("count", records.size()));
         } catch (IOException e) {
-            WynnSortMod.logError("[WynnSort] Failed to save lootrun history", e);
+            LOG.error("Failed to save lootrun history", e);
         }
     }
 

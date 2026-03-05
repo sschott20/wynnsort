@@ -3,6 +3,8 @@ package com.wynnsort.config;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.wynnsort.WynnSortMod;
+import com.wynnsort.util.DiagnosticLog;
+import com.wynnsort.util.FeatureLogger;
 import net.fabricmc.loader.api.FabricLoader;
 
 import java.io.IOException;
@@ -13,6 +15,7 @@ import java.nio.file.Path;
 
 public class WynnSortConfig {
 
+    private static final FeatureLogger LOG = new FeatureLogger("Config", DiagnosticLog.Category.CONFIG);
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static final Path CONFIG_PATH =
             FabricLoader.getInstance().getConfigDir().resolve("wynnsort.json");
@@ -74,9 +77,9 @@ public class WynnSortConfig {
                 if (INSTANCE == null) {
                     INSTANCE = new WynnSortConfig();
                 }
-                WynnSortMod.log("Loaded config from {}", CONFIG_PATH);
+                LOG.info("Loaded from {}", CONFIG_PATH);
             } catch (IOException e) {
-                WynnSortMod.logError("Failed to load config, using defaults", e);
+                LOG.error("Failed to load, using defaults", e);
                 INSTANCE = new WynnSortConfig();
             }
         } else {
@@ -91,9 +94,9 @@ public class WynnSortConfig {
             try (Writer writer = Files.newBufferedWriter(CONFIG_PATH)) {
                 GSON.toJson(INSTANCE, writer);
             }
-            WynnSortMod.log("Saved config to {}", CONFIG_PATH);
+            LOG.info("Saved to {}", CONFIG_PATH);
         } catch (IOException e) {
-            WynnSortMod.logError("Failed to save config", e);
+            LOG.error("Failed to save", e);
         }
     }
 }

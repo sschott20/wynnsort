@@ -4,6 +4,8 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.wynnsort.WynnSortMod;
 import com.wynnsort.config.WynnSortConfig;
+import com.wynnsort.util.DiagnosticLog;
+import com.wynnsort.util.FeatureLogger;
 import com.wynntils.core.components.Models;
 import com.wynntils.mc.event.ContainerSetContentEvent;
 import com.wynntils.models.containers.Container;
@@ -26,7 +28,9 @@ import java.io.Writer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -45,6 +49,7 @@ import java.util.Optional;
 public class DryStreakTracker implements HudRenderCallback {
 
     public static final DryStreakTracker INSTANCE = new DryStreakTracker();
+    private static final FeatureLogger LOG = new FeatureLogger("DryStrk", DiagnosticLog.Category.DRY_STREAK);
 
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static final Path DATA_PATH =
@@ -115,7 +120,7 @@ public class DryStreakTracker implements HudRenderCallback {
         ensureLoaded();
 
         int pulls = event.getRewardPulls();
-        WynnSortMod.log("[DryStreak] Lootrun completed: {} reward pulls, {} challenges, {}s elapsed",
+        LOG.info("Lootrun completed: {} reward pulls, {} challenges, {}s elapsed",
                 pulls, event.getChallengesCompleted(), event.getTimeElapsed());
 
         // Store pending pulls — mythic detection happens via container scanning
@@ -137,7 +142,7 @@ public class DryStreakTracker implements HudRenderCallback {
      */
     @SubscribeEvent
     public void onLootrunFailed(LootrunFinishedEvent.Failed event) {
-        WynnSortMod.log("[DryStreak] Lootrun failed, resetting transient state");
+        LOG.info("Lootrun failed, resetting transient state");
         resetTransientState();
     }
 
@@ -155,6 +160,7 @@ public class DryStreakTracker implements HudRenderCallback {
         try {
             state = Models.Lootrun.getState();
         } catch (Exception e) {
+            LOG.warn("Models.Lootrun.getState() failed in container scan: {}", e.getMessage());
             return;
         }
         if (state == LootrunningState.NOT_RUNNING) return;
@@ -165,15 +171,16 @@ public class DryStreakTracker implements HudRenderCallback {
             Container container = Models.Container.getCurrentContainer();
             if (container != null) {
                 String containerName = container.getContainerName();
-                // Lootrun reward chests have titles like "Lootrun Reward" or similar
-                // Also check class name for LootrunRewardChestContainer
                 String className = container.getClass().getSimpleName();
+                // Exploratory: log container class/title/slot count for discovery
+                LOG.info("Container scan: class={}, fullClass={}, title=\"{}\", id={}",
+                        className, container.getClass().getName(), containerName,
+                        container.getContainerId());
                 isRewardChest = className.contains("LootrunRewardChest")
                         || (containerName != null && containerName.toLowerCase().contains("lootrun reward"));
             }
         } catch (Exception e) {
-            // Fallback: scan anyway if we can't determine container type
-            WynnSortMod.log("[DryStreak] Could not determine container type: {}", e.getMessage());
+            LOG.warn("Could not determine container type: {}", e.getMessage());
         }
 
         if (!isRewardChest) return;
@@ -182,6 +189,7 @@ public class DryStreakTracker implements HudRenderCallback {
         List<ItemStack> items = event.getItems();
         if (items == null || items.isEmpty()) return;
 
+        LOG.info("Scanning reward chest: {} slots for mythics", items.size());
         scanForMythics(items);
     }
 
@@ -202,14 +210,19 @@ public class DryStreakTracker implements HudRenderCallback {
                     GearTier tier = gearItem.getGearTier();
                     if (tier == GearTier.MYTHIC) {
                         String name = gearItem.getName();
-                        WynnSortMod.log("[DryStreak] MYTHIC FOUND in reward chest: {}", name);
+                        LOG.info("MYTHIC FOUND in reward chest: {} (tier={}, class={})",
+                                name, tier.name(), gearItem.getClass().getSimpleName());
                         mythicFoundThisRun = true;
                         mythicNameThisRun = name;
+                        Map<String, Object> evtData = new LinkedHashMap<>();
+                        evtData.put("name", name);
+                        evtData.put("tier", tier.name());
+                        LOG.event("mythic_found", evtData);
                         return; // One mythic per run is enough to reset
                     }
                 }
             } catch (Exception e) {
-                WynnSortMod.log("[DryStreak] Error scanning item: {}", e.getMessage());
+                LOG.info("Error scanning item: {}", e.getMessage());
             }
         }
     }
@@ -221,13 +234,13 @@ public class DryStreakTracker implements HudRenderCallback {
     private void finalizeLootrun() {
         if (mythicFoundThisRun) {
             // Mythic found! Record it and reset dry streak
-            WynnSortMod.log("[DryStreak] Mythic detected this run: \"{}\"", mythicNameThisRun);
-            WynnSortMod.log("[DryStreak] Dry streak was: {} pulls", data.totalPullsWithoutMythic);
+            LOG.info("Mythic detected this run: \"{}\"", mythicNameThisRun);
+            LOG.info("Dry streak was: {} pulls", data.totalPullsWithoutMythic);
 
             // Update longest dry streak if current one is a record
             if (data.totalPullsWithoutMythic > data.longestDryStreak) {
                 data.longestDryStreak = data.totalPullsWithoutMythic;
-                WynnSortMod.log("[DryStreak] New longest dry streak record: {} pulls", data.longestDryStreak);
+                LOG.info("New longest dry streak record: {} pulls", data.longestDryStreak);
             }
 
             // Record the mythic
@@ -241,7 +254,7 @@ public class DryStreakTracker implements HudRenderCallback {
         } else {
             // No mythic — extend dry streak
             data.totalPullsWithoutMythic += pendingPulls;
-            WynnSortMod.log("[DryStreak] No mythic this run. Dry streak now: {} pulls (+{})",
+            LOG.info("No mythic this run. Dry streak now: {} pulls (+{})",
                     data.totalPullsWithoutMythic, pendingPulls);
 
             // Update longest dry streak if current one is a record
@@ -249,6 +262,14 @@ public class DryStreakTracker implements HudRenderCallback {
                 data.longestDryStreak = data.totalPullsWithoutMythic;
             }
         }
+
+        Map<String, Object> streakData = new LinkedHashMap<>();
+        streakData.put("currentDryStreak", data.totalPullsWithoutMythic);
+        streakData.put("longestDryStreak", data.longestDryStreak);
+        streakData.put("totalLifetimePulls", data.totalLifetimePulls);
+        streakData.put("mythicsFound", data.mythicsFound);
+        streakData.put("mythicThisRun", mythicFoundThisRun);
+        LOG.event("dry_streak_updated", streakData);
 
         save();
         resetTransientState();
@@ -275,6 +296,7 @@ public class DryStreakTracker implements HudRenderCallback {
         try {
             state = Models.Lootrun.getState();
         } catch (Exception e) {
+            LOG.warn("Models.Lootrun.getState() failed in HUD render: {}", e.getMessage());
             return;
         }
         if (state == LootrunningState.NOT_RUNNING) return;
@@ -377,16 +399,16 @@ public class DryStreakTracker implements HudRenderCallback {
                 DryStreakData loaded = GSON.fromJson(reader, DryStreakData.class);
                 if (loaded != null) {
                     this.data = loaded;
-                    WynnSortMod.log("[DryStreak] Loaded data: dry={}, lifetime={}, mythics={}, longest={}, lastMythic=\"{}\"",
+                    LOG.info("Loaded data: dry={}, lifetime={}, mythics={}, longest={}, lastMythic=\"{}\"",
                             data.totalPullsWithoutMythic, data.totalLifetimePulls,
                             data.mythicsFound, data.longestDryStreak, data.lastMythicName);
                 }
             } catch (Exception e) {
-                WynnSortMod.logWarn("[DryStreak] Failed to load data, using defaults", e);
+                LOG.warn("Failed to load data, using defaults", e);
                 this.data = new DryStreakData();
             }
         } else {
-            WynnSortMod.log("[DryStreak] No saved data found, starting fresh");
+            LOG.info("No saved data found, starting fresh");
             this.data = new DryStreakData();
         }
         this.loaded = true;
@@ -398,9 +420,9 @@ public class DryStreakTracker implements HudRenderCallback {
             try (Writer writer = Files.newBufferedWriter(DATA_PATH)) {
                 GSON.toJson(data, writer);
             }
-            WynnSortMod.log("[DryStreak] Saved data to {}", DATA_PATH);
+            LOG.info("Saved data to {}", DATA_PATH);
         } catch (IOException e) {
-            WynnSortMod.logError("[DryStreak] Failed to save data", e);
+            LOG.error("Failed to save data", e);
         }
     }
 }

@@ -4,6 +4,7 @@ import com.wynnsort.SortState;
 import com.wynnsort.StatFilter;
 import com.wynnsort.config.WynnSortConfig;
 import com.wynnsort.util.DiagnosticLog;
+import com.wynnsort.util.FeatureLogger;
 import com.wynnsort.util.ScoreComputation;
 import com.wynntils.core.components.Models;
 import com.wynntils.mc.event.SlotRenderEvent;
@@ -23,6 +24,8 @@ import java.util.*;
 public class QualityOverlayFeature {
 
     public static final QualityOverlayFeature INSTANCE = new QualityOverlayFeature();
+
+    private static final FeatureLogger LOG = new FeatureLogger("Overlay", DiagnosticLog.Category.OVERLAY);
 
     // Quality tier colors (ARGB, 50% alpha)
     private static final int COLOR_POOR = 0x80FF3333;       // 0-29%   red
@@ -47,6 +50,10 @@ public class QualityOverlayFeature {
     /** Maps slot index -> rank (1, 2, or 3). Only top 3 entries. */
     private Map<Integer, Integer> slotRanks = Collections.emptyMap();
 
+    // Logging state
+    private boolean firstRenderLogged = false;
+    private String lastContainerTitle = null;
+
     private QualityOverlayFeature() {}
 
     @SubscribeEvent
@@ -55,6 +62,13 @@ public class QualityOverlayFeature {
 
         Minecraft mc = Minecraft.getInstance();
         if (!(mc.screen instanceof AbstractContainerScreen<?> containerScreen)) return;
+
+        // Detect new container (exploratory: log container title and screen class)
+        String containerTitle = containerScreen.getTitle().getString();
+        if (!containerTitle.equals(lastContainerTitle)) {
+            lastContainerTitle = containerTitle;
+            firstRenderLogged = false;
+        }
 
         // Recompute ranks once per frame
         long currentFrame = mc.getFrameTimeNs();
@@ -78,6 +92,15 @@ public class QualityOverlayFeature {
         float pct = ScoreComputation.computeScore(gearItem, gearInstance, SortState.getFilters());
         if (Float.isNaN(pct) || pct < 0.0f) return;
 
+        // Log first successful render per container (exploratory: container title, screen class, item info)
+        if (!firstRenderLogged) {
+            firstRenderLogged = true;
+            LOG.info("Overlay active: container='{}', screenClass={}, item={}, score={}%",
+                    containerTitle, containerScreen.getClass().getSimpleName(),
+                    gearItem.getItemInfo().name(), Math.round(pct));
+            LOG.event("overlay_active", Map.of("container", containerTitle, "screenClass", containerScreen.getClass().getSimpleName()));
+        }
+
         // Sampled diagnostic logging (not every frame)
         diagnosticSampleCounter++;
         if (diagnosticSampleCounter >= DIAGNOSTIC_SAMPLE_RATE) {
@@ -86,7 +109,7 @@ public class QualityOverlayFeature {
                 String itemName = gearItem.getItemInfo().name();
                 DiagnosticLog.event(DiagnosticLog.Category.OVERLAY, "score_computed",
                         Map.of("item", itemName, "score", Math.round(pct)));
-            } catch (Exception ignored) {}
+            } catch (Exception e) { LOG.warn("Diagnostic sample failed", e); }
         }
 
         GuiGraphics guiGraphics = event.getGuiGraphics();

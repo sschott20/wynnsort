@@ -2,10 +2,15 @@ package com.wynnsort.feature;
 
 import com.wynnsort.WynnSortMod;
 import com.wynnsort.config.WynnSortConfig;
+import com.wynnsort.util.DiagnosticLog;
+import com.wynnsort.util.FeatureLogger;
 import com.wynnsort.lootrun.LootrunRecord;
 import com.wynnsort.lootrun.LootrunStore;
 import com.wynntils.models.lootrun.event.LootrunFinishedEvent;
 import net.neoforged.bus.api.SubscribeEvent;
+
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /**
  * Subscribes to Wynntils' lootrun finished events and records each run
@@ -14,6 +19,7 @@ import net.neoforged.bus.api.SubscribeEvent;
 public class LootrunHistoryFeature {
 
     public static final LootrunHistoryFeature INSTANCE = new LootrunHistoryFeature();
+    private static final FeatureLogger LOG = new FeatureLogger("LRHist", DiagnosticLog.Category.LOOTRUN);
 
     private LootrunHistoryFeature() {}
 
@@ -39,12 +45,20 @@ public class LootrunHistoryFeature {
 
             LootrunStore.addRecord(record);
 
-            WynnSortMod.log("[WynnSort] Lootrun COMPLETED: challenges={}, pulls={}, rerolls={}, sacrifices={}, xp={}, mobs={}, chests={}, time={}s",
+            LOG.info("Lootrun COMPLETED: challenges={}, pulls={}, rerolls={}, sacrifices={}, xp={}, mobs={}, chests={}, time={}s",
                     record.challengesCompleted, record.pullsEarned, record.rerollsEarned,
                     record.sacrifices, record.xpEarned, record.mobsKilled,
                     record.chestsOpened, event.getTimeElapsed());
+
+            Map<String, Object> evtData = new LinkedHashMap<>();
+            evtData.put("completed", true);
+            evtData.put("challenges", record.challengesCompleted);
+            evtData.put("pulls", record.pullsEarned);
+            evtData.put("rerolls", record.rerollsEarned);
+            evtData.put("timeSeconds", event.getTimeElapsed());
+            LOG.event("run_recorded", evtData);
         } catch (Exception e) {
-            WynnSortMod.logError("[WynnSort] Error recording completed lootrun", e);
+            LOG.error("Error recording completed lootrun", e);
         }
     }
 
@@ -70,10 +84,16 @@ public class LootrunHistoryFeature {
 
             LootrunStore.addRecord(record);
 
-            WynnSortMod.log("[WynnSort] Lootrun FAILED: challenges={}, time={}s",
+            LOG.info("Lootrun FAILED: challenges={}, time={}s",
                     record.challengesCompleted, event.getTimeElapsed());
+
+            Map<String, Object> evtData = new LinkedHashMap<>();
+            evtData.put("completed", false);
+            evtData.put("challenges", record.challengesCompleted);
+            evtData.put("timeSeconds", event.getTimeElapsed());
+            LOG.event("run_recorded", evtData);
         } catch (Exception e) {
-            WynnSortMod.logError("[WynnSort] Error recording failed lootrun", e);
+            LOG.error("Error recording failed lootrun", e);
         }
     }
 }

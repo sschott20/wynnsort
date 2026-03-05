@@ -3,6 +3,8 @@ package com.wynnsort.feature;
 import com.wynnsort.SortState;
 import com.wynnsort.StatFilter;
 import com.wynnsort.config.WynnSortConfig;
+import com.wynnsort.util.DiagnosticLog;
+import com.wynnsort.util.FeatureLogger;
 import com.wynnsort.util.ScoreComputation;
 import com.wynntils.core.components.Models;
 import com.wynntils.mc.event.ItemTooltipRenderEvent;
@@ -24,50 +26,72 @@ public class TooltipFeature {
 
     public static final TooltipFeature INSTANCE = new TooltipFeature();
 
+    private static final FeatureLogger LOG = new FeatureLogger("Tooltip", DiagnosticLog.Category.TOOLTIP);
+    private boolean firstTooltipLogged = false;
+
     private TooltipFeature() {}
 
     @SubscribeEvent
     public void onItemTooltipRender(ItemTooltipRenderEvent.Pre event) {
-        if (!WynnSortConfig.INSTANCE.overlayEnabled) {
-            return;
-        }
+        try {
+            if (!WynnSortConfig.INSTANCE.overlayEnabled) {
+                return;
+            }
 
-        ItemStack itemStack = event.getItemStack();
-        if (itemStack.isEmpty()) {
-            return;
-        }
+            ItemStack itemStack = event.getItemStack();
+            if (itemStack.isEmpty()) {
+                return;
+            }
 
-        Optional<WynnItem> wynnItemOpt = Models.Item.getWynnItem(itemStack);
-        if (wynnItemOpt.isEmpty()) {
-            return;
-        }
-        if (!(wynnItemOpt.get() instanceof GearItem gearItem)) {
-            return;
-        }
+            Optional<WynnItem> wynnItemOpt = Models.Item.getWynnItem(itemStack);
+            if (wynnItemOpt.isEmpty()) {
+                return;
+            }
+            if (!(wynnItemOpt.get() instanceof GearItem gearItem)) {
+                return;
+            }
 
-        Optional<GearInstance> gearInstanceOpt = gearItem.getItemInstance();
-        if (gearInstanceOpt.isEmpty()) {
-            return;
-        }
+            Optional<GearInstance> gearInstanceOpt = gearItem.getItemInstance();
+            if (gearInstanceOpt.isEmpty()) {
+                return;
+            }
 
-        GearInstance gearInstance = gearInstanceOpt.get();
-        List<StatFilter> filters = SortState.getFilters();
+            GearInstance gearInstance = gearInstanceOpt.get();
+            List<StatFilter> filters = SortState.getFilters();
 
-        ScoreResult result = computeScore(gearItem, gearInstance, filters);
-        if (result == null) {
-            return;
-        }
+            ScoreResult result = computeScore(gearItem, gearInstance, filters);
+            if (result == null) {
+                // Score was NaN or negative
+                String itemName = gearItem.getItemInfo().name();
+                LOG.warn("Score NaN/negative for item={}, wynnItemType={}", itemName, wynnItemOpt.get().getClass().getSimpleName());
+                return;
+            }
 
-        // Build the tooltip line: "WynnSort: XX% (label)"
-        String colorCode = getColorCode(result.percentage);
-        String line = "\u00A76WynnSort: " + colorCode + Math.round(result.percentage) + "% \u00A77(" + result.label + ")";
+            // Build the tooltip line: "WynnSort: XX% (label)"
+            String colorCode = getColorCode(result.percentage);
+            String line = "\u00A76WynnSort: " + colorCode + Math.round(result.percentage) + "% \u00A77(" + result.label + ")";
 
-        List<Component> tooltips = event.getTooltips();
-        // Insert after the first line (item name) if possible, otherwise append
-        if (tooltips.size() > 1) {
-            tooltips.add(1, Component.literal(line));
-        } else {
-            tooltips.add(Component.literal(line));
+            List<Component> tooltips = event.getTooltips();
+            // Insert after the first line (item name) if possible, otherwise append
+            if (tooltips.size() > 1) {
+                tooltips.add(1, Component.literal(line));
+            } else {
+                tooltips.add(Component.literal(line));
+            }
+
+            // Log first successful tooltip injection per session (exploratory)
+            if (!firstTooltipLogged) {
+                firstTooltipLogged = true;
+                String itemName = gearItem.getItemInfo().name();
+                LOG.info("First tooltip: item='{}', score={}%, label='{}', wynnItemClass={}",
+                        itemName, Math.round(result.percentage), result.label,
+                        wynnItemOpt.get().getClass().getSimpleName());
+                LOG.event("first_tooltip", java.util.Map.of(
+                        "item", itemName, "score", Math.round(result.percentage),
+                        "label", result.label));
+            }
+        } catch (Exception e) {
+            LOG.error("Error in tooltip render", e);
         }
     }
 
