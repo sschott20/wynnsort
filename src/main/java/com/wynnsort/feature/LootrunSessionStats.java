@@ -62,8 +62,6 @@ public class LootrunSessionStats implements HudRenderCallback {
     private int lastRerolls = 0;
     private int lastSacrifices = 0;
 
-    /** Tick counter for periodic logging. */
-    private int logTick = 0;
 
     private LootrunSessionStats() {}
 
@@ -155,18 +153,7 @@ public class LootrunSessionStats implements HudRenderCallback {
             return;
         }
 
-        // Periodic logging + exploratory: raw Lootrun state
-        logTick++;
-        if (logTick >= 200) {
-            logTick = 0;
-            LOG.info("SessionStats tick: rawState={} (enum={}), lastState={}",
-                    currentState, currentState.name(), lastState);
-            if (currentSession != null) {
-                LOG.info("  session: challenges={}, beacons={}, duration={}",
-                        currentSession.challengesCompleted,
-                        currentSession.getBeaconSummary(), currentSession.getFormattedDuration());
-            }
-        }
+        // Log only on state changes (not every tick)
 
         // Detect lootrun start
         if (currentState.isRunning() && !lastState.isRunning()) {

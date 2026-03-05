@@ -134,8 +134,6 @@ public class LootrunBeaconTracker implements HudRenderCallback {
     /** Snapshot of Wynntils rainbow beacon count when entering CHOOSING_BEACON. */
     private int snapshotRainbowCount = 0;
 
-    /** Tick counter for periodic state logging. */
-    private int hudLogTick = 0;
 
     private LootrunBeaconTracker() {}
 
@@ -175,23 +173,10 @@ public class LootrunBeaconTracker implements HudRenderCallback {
             return;
         }
 
-        // Log state periodically (~5 seconds)
-        hudLogTick++;
-        if (hudLogTick >= 100) {
-            hudLogTick = 0;
-            LOG.info("HUD tick: lootrunState={} (class={}), lastState={}, orangeBeacons={}, " +
-                            "rainbowRemaining={}, aquaPending={}, beaconCounts={}, bootstrapped={}",
-                    currentState, currentState.getClass().getName(), lastState, orangeBeacons,
-                    rainbowRemaining, aquaPending, beaconCounts, bootstrapped);
-            // Exploratory: log raw Wynntils API beacon values
-            try {
-                LOG.info("  API raw: getState()={}, activeOrange={}, activeRainbow={}",
-                        Models.Lootrun.getState().name(),
-                        Models.Lootrun.getActiveOrangeBeacons(),
-                        Models.Lootrun.getActiveRainbowBeacons());
-            } catch (Exception ex) {
-                LOG.warn("  API raw beacon query failed: {}", ex.getMessage());
-            }
+        // Log only on state changes (not every tick)
+        if (currentState != lastState) {
+            LOG.info("State change: {} -> {}, orangeBeacons={}, beaconCounts={}, bootstrapped={}",
+                    lastState, currentState, orangeBeacons, beaconCounts, bootstrapped);
         }
 
         // Clear on lootrun end
