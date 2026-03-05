@@ -2,9 +2,8 @@ package com.wynnsort.config;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonSyntaxException;
 import com.wynnsort.WynnSortMod;
-import com.wynnsort.util.DiagnosticLog;
-import com.wynnsort.util.FeatureLogger;
 import net.fabricmc.loader.api.FabricLoader;
 
 import java.io.IOException;
@@ -15,7 +14,6 @@ import java.nio.file.Path;
 
 public class WynnSortConfig {
 
-    private static final FeatureLogger LOG = new FeatureLogger("Config", DiagnosticLog.Category.CONFIG);
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static final Path CONFIG_PATH =
             FabricLoader.getInstance().getConfigDir().resolve("wynnsort.json");
@@ -28,6 +26,7 @@ public class WynnSortConfig {
     public boolean showPercentageText = true;
     public boolean sortButtonEnabled = true;
     public String lastFilter = "";
+    public boolean autoSortCheapest = true;
     /** true = use Nori/Wynnpool weighted scale, false = use default overall % */
     public boolean useWeightedScale = true;
     /** Show orange beacon duration tracker during lootruns */
@@ -64,6 +63,69 @@ public class WynnSortConfig {
     public int crowdsourceFlushMinutes = 5;
     /** Enable structured diagnostic logging (JSONL events + in-game viewer) */
     public boolean diagnosticLoggingEnabled = true;
+    /** Enable item comparison tooltip overlay */
+    public boolean itemComparisonEnabled = true;
+
+    // --- Validation ---
+
+    /**
+     * Clamps all numeric config fields to valid ranges.
+     * Logs a warning for each value that is corrected.
+     */
+    public void validate() {
+        tradeMarketBuyTaxPercent = clampInt("tradeMarketBuyTaxPercent",
+                tradeMarketBuyTaxPercent, 0, 100);
+        marketPriceStalenessHours = clampInt("marketPriceStalenessHours",
+                marketPriceStalenessHours, 1, 8760);
+        priceHistoryMaxDays = clampInt("priceHistoryMaxDays",
+                priceHistoryMaxDays, 1, 365);
+        crowdsourceFlushMinutes = clampInt("crowdsourceFlushMinutes",
+                crowdsourceFlushMinutes, 1, 1440);
+        tradeHistoryMinPriceFilter = clampLong("tradeHistoryMinPriceFilter",
+                tradeHistoryMinPriceFilter, 0, Long.MAX_VALUE);
+
+        // Null-guard string fields that should never be null after deserialization
+        if (lastFilter == null) {
+            lastFilter = "";
+        }
+        if (crowdsourceApiUrl == null) {
+            crowdsourceApiUrl = "";
+        }
+    }
+
+    private static int clampInt(String name, int value, int min, int max) {
+        if (value < min) {
+            WynnSortMod.logWarn("[WS:Config] {} value {} below minimum, clamped to {}", name, value, min);
+            return min;
+        }
+        if (value > max) {
+            WynnSortMod.logWarn("[WS:Config] {} value {} above maximum, clamped to {}", name, value, max);
+            return max;
+        }
+        return value;
+    }
+
+    private static long clampLong(String name, long value, long min, long max) {
+        if (value < min) {
+            WynnSortMod.logWarn("[WS:Config] {} value {} below minimum, clamped to {}", name, value, min);
+            return min;
+        }
+        if (value > max) {
+            WynnSortMod.logWarn("[WS:Config] {} value {} above maximum, clamped to {}", name, value, max);
+            return max;
+        }
+        return value;
+    }
+
+    // --- Defaults ---
+
+    /**
+     * Returns a fresh config instance with all fields set to their declared defaults.
+     */
+    public static WynnSortConfig resetToDefaults() {
+        return new WynnSortConfig();
+    }
+
     // --- Persistence ---
 
     public static void load() {
@@ -73,9 +135,15 @@ public class WynnSortConfig {
                 if (INSTANCE == null) {
                     INSTANCE = new WynnSortConfig();
                 }
-                LOG.info("Loaded from {}", CONFIG_PATH);
+                INSTANCE.validate();
+                WynnSortMod.log("[WS:Config] Loaded config from {}", CONFIG_PATH);
+            } catch (JsonSyntaxException e) {
+                WynnSortMod.logWarn("[WS:Config] Corrupt JSON in config file, resetting to defaults: {}",
+                        e.getMessage());
+                INSTANCE = new WynnSortConfig();
+                save();
             } catch (IOException e) {
-                LOG.error("Failed to load, using defaults", e);
+                WynnSortMod.logError("[WS:Config] Failed to load config, using defaults", e);
                 INSTANCE = new WynnSortConfig();
             }
         } else {
@@ -90,9 +158,9 @@ public class WynnSortConfig {
             try (Writer writer = Files.newBufferedWriter(CONFIG_PATH)) {
                 GSON.toJson(INSTANCE, writer);
             }
-            LOG.info("Saved to {}", CONFIG_PATH);
+            WynnSortMod.log("[WS:Config] Saved config to {}", CONFIG_PATH);
         } catch (IOException e) {
-            LOG.error("Failed to save", e);
+            WynnSortMod.logError("[WS:Config] Failed to save config", e);
         }
     }
 }

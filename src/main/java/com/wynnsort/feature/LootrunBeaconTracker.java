@@ -734,7 +734,7 @@ public class LootrunBeaconTracker implements HudRenderCallback {
         List<HudLine> lines = new ArrayList<>();
         BeaconEffectSummary summary = computeEffectSummary();
 
-        // Orange beacons - per-beacon countdown with "+1 choice" label
+        // Orange beacons - just show remaining count per beacon
         if (!orangeBeacons.isEmpty()) {
             List<Integer> sorted = new ArrayList<>(orangeBeacons);
             sorted.sort((a, b) -> {
@@ -744,38 +744,32 @@ public class LootrunBeaconTracker implements HudRenderCallback {
                 return Integer.compare(b, a);
             });
 
-            for (int i = 0; i < sorted.size(); i++) {
-                int count = sorted.get(i);
+            for (int count : sorted) {
                 int color = getCountColor(count);
-                String label = sorted.size() > 1
-                        ? "Orange #" + (i + 1) + ": "
-                        : "Orange: ";
-                String text = count < 0
-                        ? label + "active (+1 choice)"
-                        : label + count + " chall. left (+1 choice)";
+                String text = count < 0 ? "Orange: active" : "Orange: " + count;
                 lines.add(new HudLine(text, color));
             }
         }
 
-        // Rainbow - remaining challenges
+        // Rainbow
         if (rainbowRemaining >= 0) {
             String text = rainbowRemaining > 0
-                    ? "Rainbow: " + rainbowRemaining + " left"
+                    ? "Rainbow: " + rainbowRemaining
                     : "Rainbow: active";
             lines.add(new HudLine(text, BEACON_COLORS.get(LootrunBeaconKind.RAINBOW)));
         }
 
-        // Gray (missions) - max 3 per run
+        // Gray
         int grayCount = getBeaconCount(LootrunBeaconKind.GRAY);
         if (grayCount > 0) {
-            lines.add(new HudLine("Grey: " + grayCount + "/3 missions",
+            lines.add(new HudLine("Grey: " + grayCount + "/3",
                     BEACON_COLORS.get(LootrunBeaconKind.GRAY)));
         }
 
-        // Crimson (trials) - max 2 per run
+        // Crimson
         int crimsonCount = getBeaconCount(LootrunBeaconKind.CRIMSON);
         if (crimsonCount > 0) {
-            lines.add(new HudLine("Crimson: " + crimsonCount + "/2 trials",
+            lines.add(new HudLine("Crimson: " + crimsonCount + "/2",
                     BEACON_COLORS.get(LootrunBeaconKind.CRIMSON)));
         }
 

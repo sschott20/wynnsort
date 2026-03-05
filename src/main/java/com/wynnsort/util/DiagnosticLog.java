@@ -10,7 +10,10 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
@@ -159,6 +162,22 @@ public final class DiagnosticLog {
             return exportPath;
         } catch (IOException e) {
             return null;
+        }
+    }
+
+    /**
+     * Clears the in-memory ring buffer. Does not affect the on-disk log file.
+     */
+    public static void clearBuffer() {
+        lock.lock();
+        try {
+            for (int i = 0; i < RING_BUFFER_SIZE; i++) {
+                buffer[i] = null;
+            }
+            writeIndex = 0;
+            count = 0;
+        } finally {
+            lock.unlock();
         }
     }
 

@@ -4,6 +4,8 @@ public class TransactionRecord {
 
     public enum Type { BUY, SELL }
 
+    public static final String CSV_HEADER = "type,itemName,baseName,quantity,priceEmeralds,timestamp,otherParty,statFingerprint";
+
     public String itemName;
     public long priceEmeralds;
     public Type type;
@@ -33,5 +35,29 @@ public class TransactionRecord {
         this(itemName, priceEmeralds, type, otherParty, quantity);
         this.baseName = baseName;
         this.statFingerprint = statFingerprint;
+    }
+
+    /**
+     * Returns a CSV-formatted line representing this record.
+     * Fields containing commas, quotes, or newlines are wrapped in double quotes
+     * with internal quotes escaped by doubling.
+     */
+    public String toCsvLine() {
+        return escapeCsv(type != null ? type.name() : "") + ","
+                + escapeCsv(itemName) + ","
+                + escapeCsv(baseName) + ","
+                + quantity + ","
+                + priceEmeralds + ","
+                + timestamp + ","
+                + escapeCsv(otherParty) + ","
+                + escapeCsv(statFingerprint);
+    }
+
+    private static String escapeCsv(String value) {
+        if (value == null) return "";
+        if (value.indexOf(',') >= 0 || value.indexOf('"') >= 0 || value.indexOf('\n') >= 0) {
+            return "\"" + value.replace("\"", "\"\"") + "\"";
+        }
+        return value;
     }
 }

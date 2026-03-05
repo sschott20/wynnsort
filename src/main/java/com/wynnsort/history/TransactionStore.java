@@ -4,10 +4,9 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.reflect.TypeToken;
 import com.wynnsort.WynnSortMod;
-import com.wynnsort.util.DiagnosticLog;
-import com.wynnsort.util.FeatureLogger;
 import net.fabricmc.loader.api.FabricLoader;
 
+import java.io.BufferedWriter;
 import java.io.IOException;
 import java.io.Reader;
 import java.io.Writer;
@@ -16,8 +15,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -28,7 +29,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 public class TransactionStore {
 
-    private static final FeatureLogger LOG = new FeatureLogger("TxStore", DiagnosticLog.Category.PERSISTENCE);
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static final Path STORE_PATH = FabricLoader.getInstance().getConfigDir()
             .resolve("wynnsort").resolve("transactions.json");
@@ -48,11 +48,10 @@ public class TransactionStore {
                 if (loaded != null) {
                     transactions.clear();
                     transactions.addAll(loaded);
-                    LOG.info("Loaded {} transactions from {}", transactions.size(), STORE_PATH);
-                    LOG.event("store_loaded", Map.of("count", transactions.size()));
+                    WynnSortMod.log("Loaded {} transactions from {}", transactions.size(), STORE_PATH);
                 }
             } catch (IOException e) {
-                LOG.error("Failed to load transactions", e);
+                WynnSortMod.logError("Failed to load transactions", e);
             }
         }
 
@@ -76,7 +75,7 @@ public class TransactionStore {
                 String existingName = existing.baseName != null ? existing.baseName : existing.itemName;
                 String recordName = record.baseName != null ? record.baseName : record.itemName;
                 if (existingName != null && existingName.equalsIgnoreCase(recordName)) {
-                    LOG.warn("Skipping duplicate transaction: {} {} for {} emeralds",
+                    WynnSortMod.logWarn("Skipping duplicate transaction: {} {} for {} emeralds",
                             record.type, record.itemName, record.priceEmeralds);
                     return;
                 }
@@ -88,25 +87,49 @@ public class TransactionStore {
             transactions.remove(0);
         }
         dirty.set(true);
-        LOG.info("Logged transaction: {} {}x {} for {} emeralds",
+        WynnSortMod.log("Logged transaction: {} {}x {} for {} emeralds",
                 record.type, record.quantity, record.itemName, record.priceEmeralds);
     }
 
     public static void removeTransaction(TransactionRecord record) {
         if (transactions.remove(record)) {
             dirty.set(true);
-            LOG.info("Removed transaction: {} {}", record.type, record.itemName);
+            WynnSortMod.log("Removed transaction: {} {}", record.type, record.itemName);
         }
     }
 
     public static void clearTransactions() {
         transactions.clear();
         dirty.set(true);
-        LOG.info("Cleared all transactions");
+        WynnSortMod.log("Cleared all transactions");
     }
 
     public static List<TransactionRecord> getTransactions() {
         return Collections.unmodifiableList(new ArrayList<>(transactions));
+    }
+
+    /**
+     * Returns the number of stored transactions without creating a defensive copy.
+     */
+    public static int getTransactionCount() {
+        return transactions.size();
+    }
+
+    /**
+     * Exports all transactions to a CSV file at the given path.
+     * Writes a header row followed by one row per transaction.
+     */
+    public static void exportToCsv(Path outputPath) throws IOException {
+        Files.createDirectories(outputPath.getParent());
+        try (BufferedWriter writer = Files.newBufferedWriter(outputPath)) {
+            writer.write(TransactionRecord.CSV_HEADER);
+            writer.newLine();
+            for (TransactionRecord record : transactions) {
+                writer.write(record.toCsvLine());
+                writer.newLine();
+            }
+        }
+        WynnSortMod.log("Exported {} transactions to {}", transactions.size(), outputPath);
     }
 
     /**
@@ -144,6 +167,8 @@ public class TransactionStore {
     /**
      * Pair BUY and SELL records. Identified gear matches on fingerprint; unid/non-gear on baseName.
      * Returns paired entries (buy+sell or unpaired buy) and populates unpairedSells with leftovers.
+     *
+     * Uses index maps for O(n) average-case matching instead of O(n^2) nested loops.
      */
     public static List<TransactionPair> pairTransactions(List<TransactionRecord> records, int buyTaxPercent,
                                                           List<TransactionRecord> unpairedSells) {
@@ -154,6 +179,32 @@ public class TransactionStore {
             else sells.add(r);
         }
 
+        // Build index maps from fingerprint/baseName to buy indices (sorted by timestamp descending)
+        // so we can look up candidate buys in O(1) per key
+        Map<String, List<Integer>> fpIndex = new HashMap<>();
+        Map<String, List<Integer>> nameIndex = new HashMap<>();
+
+        for (int i = 0; i < buys.size(); i++) {
+            TransactionRecord buy = buys.get(i);
+            String fp = buy.statFingerprint;
+            if (fp != null && !fp.isEmpty()) {
+                String normalizedFp = fp.startsWith("v1:") ? fp.substring(3) : fp;
+                fpIndex.computeIfAbsent(normalizedFp, k -> new ArrayList<>()).add(i);
+            }
+            String base = buy.baseName != null ? buy.baseName : buy.itemName;
+            if (base != null) {
+                nameIndex.computeIfAbsent(base.toLowerCase(Locale.ROOT), k -> new ArrayList<>()).add(i);
+            }
+        }
+
+        // Sort each index bucket by timestamp descending so newest match is found first
+        for (List<Integer> indices : fpIndex.values()) {
+            indices.sort((a, b) -> Long.compare(buys.get(b).timestamp, buys.get(a).timestamp));
+        }
+        for (List<Integer> indices : nameIndex.values()) {
+            indices.sort((a, b) -> Long.compare(buys.get(b).timestamp, buys.get(a).timestamp));
+        }
+
         Set<Integer> consumedBuys = new HashSet<>();
         List<TransactionPair> pairs = new ArrayList<>();
 
@@ -162,27 +213,34 @@ public class TransactionStore {
         sellsDesc.sort((a, b) -> Long.compare(b.timestamp, a.timestamp));
 
         for (TransactionRecord sell : sellsDesc) {
-            int bestIdx = -1;
-            long bestTimestamp = -1;
             String sellFp = sell.statFingerprint;
-            String sellBase = sell.baseName != null ? sell.baseName : sell.itemName;
+            int bestIdx = -1;
 
-            for (int i = 0; i < buys.size(); i++) {
-                if (consumedBuys.contains(i)) continue;
-                TransactionRecord buy = buys.get(i);
-                if (buy.timestamp > sell.timestamp) continue;
-
-                boolean match = false;
-                if (sellFp != null && !sellFp.isEmpty()) {
-                    match = fingerprintsMatch(sellFp, buy.statFingerprint);
-                } else {
-                    String buyBase = buy.baseName != null ? buy.baseName : buy.itemName;
-                    match = sellBase != null && sellBase.equalsIgnoreCase(buyBase);
+            if (sellFp != null && !sellFp.isEmpty()) {
+                // Identified gear: look up by normalized fingerprint
+                String normalizedFp = sellFp.startsWith("v1:") ? sellFp.substring(3) : sellFp;
+                List<Integer> candidates = fpIndex.get(normalizedFp);
+                if (candidates != null) {
+                    for (int idx : candidates) {
+                        if (consumedBuys.contains(idx)) continue;
+                        if (buys.get(idx).timestamp > sell.timestamp) continue;
+                        bestIdx = idx;
+                        break; // Already sorted newest-first, so first valid match is best
+                    }
                 }
-
-                if (match && buy.timestamp > bestTimestamp) {
-                    bestIdx = i;
-                    bestTimestamp = buy.timestamp;
+            } else {
+                // Unid/non-gear: look up by baseName (case-insensitive)
+                String sellBase = sell.baseName != null ? sell.baseName : sell.itemName;
+                if (sellBase != null) {
+                    List<Integer> candidates = nameIndex.get(sellBase.toLowerCase(Locale.ROOT));
+                    if (candidates != null) {
+                        for (int idx : candidates) {
+                            if (consumedBuys.contains(idx)) continue;
+                            if (buys.get(idx).timestamp > sell.timestamp) continue;
+                            bestIdx = idx;
+                            break;
+                        }
+                    }
                 }
             }
 
@@ -233,10 +291,9 @@ public class TransactionStore {
             try (Writer writer = Files.newBufferedWriter(STORE_PATH)) {
                 GSON.toJson(transactions, LIST_TYPE, writer);
             }
-            LOG.info("Saved {} transactions to {}", transactions.size(), STORE_PATH);
-            LOG.event("store_saved", Map.of("count", transactions.size()));
+            WynnSortMod.log("Saved {} transactions to {}", transactions.size(), STORE_PATH);
         } catch (IOException e) {
-            LOG.error("Failed to save transactions", e);
+            WynnSortMod.logError("Failed to save transactions", e);
         }
     }
 }

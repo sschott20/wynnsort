@@ -81,13 +81,18 @@ public final class ScoreComputation {
 
     /**
      * Checks if a stat actual value matches a target string (case-insensitive).
-     * Matches against apiName, displayName, and key — exact or contains.
+     * Matches against apiName, displayName, and key -- exact match first, then contains.
+     *
+     * Note: contains-matching is intentionally broad but can be ambiguous.
+     * For example, "dam" matches both "rawDamage" and "damageBonus".
+     * Exact matches are checked first to prefer precise hits when possible.
      */
     public static boolean statMatches(StatActualValue actual, String target) {
         String apiName = actual.statType().getApiName().toLowerCase();
         String displayName = actual.statType().getDisplayName().toLowerCase();
         String key = actual.statType().getKey().toLowerCase();
 
+        // Prefer exact match to avoid ambiguity from contains-matching
         if (apiName.equals(target) || displayName.equals(target) || key.equals(target)) {
             return true;
         }

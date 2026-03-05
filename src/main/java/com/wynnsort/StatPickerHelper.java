@@ -10,6 +10,7 @@ import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
@@ -42,6 +43,8 @@ public final class StatPickerHelper {
             }
         }
 
-        return new ArrayList<>(stats);
+        List<String> sorted = new ArrayList<>(stats);
+        Collections.sort(sorted);
+        return sorted;
     }
 }

@@ -1,1 +1,5 @@
 accessWidener v2 named
+
+# BestItemHighlightFeature needs container screen position for gold border rendering
+accessible field net/minecraft/client/gui/screens/inventory/AbstractContainerScreen leftPos I
+accessible field net/minecraft/client/gui/screens/inventory/AbstractContainerScreen topPos I

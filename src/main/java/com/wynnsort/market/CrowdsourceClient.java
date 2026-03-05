@@ -5,8 +5,6 @@ import com.google.gson.GsonBuilder;
 import com.google.gson.reflect.TypeToken;
 import com.wynnsort.WynnSortMod;
 import com.wynnsort.config.WynnSortConfig;
-import com.wynnsort.util.DiagnosticLog;
-import com.wynnsort.util.FeatureLogger;
 import net.fabricmc.loader.api.FabricLoader;
 
 import java.io.IOException;
@@ -14,13 +12,20 @@ import java.io.Reader;
 import java.io.Writer;
 import java.lang.reflect.Type;
 import java.net.URI;
+import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -40,7 +45,6 @@ import java.util.concurrent.atomic.AtomicLong;
 public class CrowdsourceClient {
 
     public static final CrowdsourceClient INSTANCE = new CrowdsourceClient();
-    private static final FeatureLogger LOG = new FeatureLogger("CrowdDB", DiagnosticLog.Category.CROWDSOURCE);
 
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static final Path LOCAL_DATA_PATH = FabricLoader.getInstance().getConfigDir()
@@ -68,7 +72,7 @@ public class CrowdsourceClient {
      */
     public void init() {
         loadLocalDb();
-        LOG.info("CrowdsourceClient initialized with {} items in local DB", localDb.size());
+        WynnSortMod.log("[WS:Crowd] Client initialized with {} items in local DB", localDb.size());
     }
 
     /**
@@ -90,7 +94,7 @@ public class CrowdsourceClient {
 
         if (added > 0) {
             saveLocalDb();
-            LOG.info("Crowdsource: saved {} entries to local DB ({} total items)",
+            WynnSortMod.log("[WS:Crowd] Saved {} entries to local DB ({} total items)",
                     added, localDb.size());
         }
 
@@ -197,18 +201,44 @@ public class CrowdsourceClient {
             ConcurrentHashMap<String, List<CrowdsourceEntry>> loaded = GSON.fromJson(reader, LOCAL_DB_TYPE);
             if (loaded != null) {
                 localDb.clear();
+                // Wrap loaded lists in synchronizedList for thread safety
                 loaded.forEach((key, list) -> {
                     localDb.put(key, Collections.synchronizedList(new ArrayList<>(list)));
                 });
             }
         } catch (IOException e) {
-            LOG.error("Failed to load crowdsource local DB", e);
+            WynnSortMod.logError("[WS:Crowd] Failed to load crowdsource local DB", e);
         }
     }
 
     private void saveLocalDb() {
         try {
             Files.createDirectories(LOCAL_DATA_PATH.getParent());
+
+            // Evict stale entries before saving
+            long now = System.currentTimeMillis();
+            long stalenessMs = WynnSortConfig.INSTANCE.marketPriceStalenessHours * 3_600_000L;
+            int evictedCount = 0;
+
+            Iterator<Map.Entry<String, List<CrowdsourceEntry>>> itemIter = localDb.entrySet().iterator();
+            while (itemIter.hasNext()) {
+                Map.Entry<String, List<CrowdsourceEntry>> mapEntry = itemIter.next();
+                List<CrowdsourceEntry> observations = mapEntry.getValue();
+                synchronized (observations) {
+                    int before = observations.size();
+                    observations.removeIf(e -> (now - e.timestamp) > stalenessMs);
+                    evictedCount += (before - observations.size());
+                    if (observations.isEmpty()) {
+                        itemIter.remove();
+                    }
+                }
+            }
+
+            if (evictedCount > 0) {
+                WynnSortMod.log("[WS:Crowd] Evicted {} stale entries from local DB", evictedCount);
+            }
+
+            // Create a snapshot for thread-safe serialization
             Map<String, List<CrowdsourceEntry>> snapshot = new HashMap<>();
             localDb.forEach((key, list) -> {
                 synchronized (list) {
@@ -219,7 +249,7 @@ public class CrowdsourceClient {
                 GSON.toJson(snapshot, LOCAL_DB_TYPE, writer);
             }
         } catch (IOException e) {
-            LOG.error("Failed to save crowdsource local DB", e);
+            WynnSortMod.logError("[WS:Crowd] Failed to save crowdsource local DB", e);
         }
     }
 
@@ -245,7 +275,7 @@ public class CrowdsourceClient {
 
     private void submitToRemote(List<CrowdsourceEntry> entries, String apiUrl) {
         if (isRateLimited()) {
-            LOG.info("Crowdsource: rate limited, skipping remote submit");
+            WynnSortMod.log("[WS:Crowd] Rate limited, skipping remote submit");
             return;
         }
 
@@ -262,17 +292,17 @@ public class CrowdsourceClient {
             getHttpClient().sendAsync(request, HttpResponse.BodyHandlers.ofString())
                     .thenAccept(response -> {
                         if (response.statusCode() >= 200 && response.statusCode() < 300) {
-                            LOG.info("Crowdsource: submitted {} entries to remote API", entries.size());
+                            WynnSortMod.log("[WS:Crowd] Submitted {} entries to remote API", entries.size());
                         } else {
-                            LOG.warn("Crowdsource: remote API returned status {}", response.statusCode());
+                            WynnSortMod.logWarn("[WS:Crowd] Remote API returned status {}", response.statusCode());
                         }
                     })
                     .exceptionally(ex -> {
-                        LOG.warn("Crowdsource: remote submit failed: {}", ex.getMessage());
+                        WynnSortMod.logWarn("[WS:Crowd] Remote submit failed: {}", ex.getMessage());
                         return null;
                     });
         } catch (Exception e) {
-            LOG.warn("Crowdsource: failed to submit to remote API: {}", e.getMessage());
+            WynnSortMod.logWarn("[WS:Crowd] Failed to submit to remote API: {}", e.getMessage());
         }
     }
 
@@ -281,8 +311,9 @@ public class CrowdsourceClient {
             return null;
         }
 
+        // Fire async request to avoid blocking the render thread
         try {
-            String encodedName = java.net.URLEncoder.encode(itemName, java.nio.charset.StandardCharsets.UTF_8);
+            String encodedName = URLEncoder.encode(itemName, StandardCharsets.UTF_8);
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(apiUrl + "/prices?item=" + encodedName))
                     .timeout(Duration.ofSeconds(10))
@@ -297,19 +328,20 @@ public class CrowdsourceClient {
                             if (data != null) {
                                 data.fetchedAt = System.currentTimeMillis();
                                 communityCache.put(itemName, data);
+                                WynnSortMod.log("[WS:Crowd] Fetched community data for '{}'", itemName);
                             }
                         }
                     })
                     .exceptionally(ex -> {
-                        LOG.warn("Crowdsource: fetch failed for '{}': {}",
+                        WynnSortMod.logWarn("[WS:Crowd] Failed to fetch community data for '{}': {}",
                                 itemName, ex.getMessage());
                         return null;
                     });
         } catch (Exception e) {
-            LOG.warn("Crowdsource: failed to initiate fetch for '{}': {}",
+            WynnSortMod.logWarn("[WS:Crowd] Failed to initiate fetch for '{}': {}",
                     itemName, e.getMessage());
         }
-        return null;
+        return null; // Data will be available on next tooltip render via cache
     }
 
     /**
@@ -318,7 +350,7 @@ public class CrowdsourceClient {
     public void shutdown() {
         if (!localDb.isEmpty()) {
             saveLocalDb();
-            LOG.info("CrowdsourceClient shutdown: saved {} items", localDb.size());
+            WynnSortMod.log("[WS:Crowd] Client shutdown: saved {} items", localDb.size());
         }
     }
 

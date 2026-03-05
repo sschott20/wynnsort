@@ -5,8 +5,6 @@ import com.google.gson.GsonBuilder;
 import com.google.gson.reflect.TypeToken;
 import com.wynnsort.WynnSortMod;
 import com.wynnsort.config.WynnSortConfig;
-import com.wynnsort.util.DiagnosticLog;
-import com.wynnsort.util.FeatureLogger;
 import net.fabricmc.loader.api.FabricLoader;
 
 import java.io.IOException;
@@ -15,7 +13,6 @@ import java.io.Writer;
 import java.lang.reflect.Type;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -24,7 +21,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 public class MarketPriceStore {
 
-    private static final FeatureLogger LOG = new FeatureLogger("PxStore", DiagnosticLog.Category.PERSISTENCE);
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static final Path STORE_PATH = FabricLoader.getInstance().getConfigDir()
             .resolve("wynnsort").resolve("market_prices.json");
@@ -41,11 +37,10 @@ public class MarketPriceStore {
                 if (loaded != null) {
                     prices.clear();
                     prices.putAll(loaded);
-                    LOG.info("Loaded {} market prices from {}", prices.size(), STORE_PATH);
-                    LOG.event("store_loaded", Map.of("count", prices.size()));
+                    WynnSortMod.log("Loaded {} market prices from {}", prices.size(), STORE_PATH);
                 }
             } catch (IOException e) {
-                LOG.error("Failed to load market prices", e);
+                WynnSortMod.logError("Failed to load market prices", e);
             }
         }
 
@@ -83,6 +78,14 @@ public class MarketPriceStore {
         return entry;
     }
 
+    /**
+     * Returns the number of price entries currently in the store (including stale ones
+     * that have not yet been evicted by the periodic save cycle).
+     */
+    public static int getEntryCount() {
+        return prices.size();
+    }
+
     private static boolean isStale(MarketPriceEntry entry, long now) {
         long stalenessMs = WynnSortConfig.INSTANCE.marketPriceStalenessHours * 3_600_000L;
         return (now - entry.timestamp) > stalenessMs;
@@ -104,10 +107,9 @@ public class MarketPriceStore {
             try (Writer writer = Files.newBufferedWriter(STORE_PATH)) {
                 GSON.toJson(prices, MAP_TYPE, writer);
             }
-            LOG.info("Saved {} market prices to {}", prices.size(), STORE_PATH);
-            LOG.event("store_saved", Map.of("count", prices.size()));
+            WynnSortMod.log("Saved {} market prices to {}", prices.size(), STORE_PATH);
         } catch (IOException e) {
-            LOG.error("Failed to save market prices", e);
+            WynnSortMod.logError("Failed to save market prices", e);
         }
     }
 }

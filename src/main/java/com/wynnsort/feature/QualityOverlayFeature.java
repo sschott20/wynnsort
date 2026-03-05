@@ -4,7 +4,6 @@ import com.wynnsort.SortState;
 import com.wynnsort.StatFilter;
 import com.wynnsort.config.WynnSortConfig;
 import com.wynnsort.util.DiagnosticLog;
-import com.wynnsort.util.FeatureLogger;
 import com.wynnsort.util.ScoreComputation;
 import com.wynntils.core.components.Models;
 import com.wynntils.mc.event.SlotRenderEvent;
@@ -19,13 +18,16 @@ import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
 import net.neoforged.bus.api.SubscribeEvent;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 
 public class QualityOverlayFeature {
 
     public static final QualityOverlayFeature INSTANCE = new QualityOverlayFeature();
-
-    private static final FeatureLogger LOG = new FeatureLogger("Overlay", DiagnosticLog.Category.OVERLAY);
 
     // Quality tier colors (ARGB, 50% alpha)
     private static final int COLOR_POOR = 0x80FF3333;       // 0-29%   red
@@ -45,34 +47,21 @@ public class QualityOverlayFeature {
     private int diagnosticSampleCounter = 0;
     private static final int DIAGNOSTIC_SAMPLE_RATE = 50;
 
-    // Per-frame rank computation cache
+    // Per-frame caches (invalidated each frame via frame timestamp)
     private long lastFrameCount = -1;
+    /** Maps slot index -> computed score. Built once per frame in computeRanks(). */
+    private Map<Integer, Float> slotScores = Collections.emptyMap();
     /** Maps slot index -> rank (1, 2, or 3). Only top 3 entries. */
     private Map<Integer, Integer> slotRanks = Collections.emptyMap();
-
-    // Logging state
-    private boolean firstRenderLogged = false;
-    private String lastContainerTitle = null;
-
-    // Circuit breaker: stop retrying after ScoreComputation fails to load
-    private boolean scoreComputationBroken = false;
 
     private QualityOverlayFeature() {}
 
     @SubscribeEvent
     public void onSlotRender(SlotRenderEvent.Post event) {
         if (!WynnSortConfig.INSTANCE.overlayEnabled) return;
-        if (scoreComputationBroken) return;
 
         Minecraft mc = Minecraft.getInstance();
         if (!(mc.screen instanceof AbstractContainerScreen<?> containerScreen)) return;
-
-        // Detect new container (exploratory: log container title and screen class)
-        String containerTitle = containerScreen.getTitle().getString();
-        if (!containerTitle.equals(lastContainerTitle)) {
-            lastContainerTitle = containerTitle;
-            firstRenderLogged = false;
-        }
 
         // Recompute ranks once per frame
         long currentFrame = mc.getFrameTimeNs();
@@ -82,45 +71,25 @@ public class QualityOverlayFeature {
         }
 
         Slot slot = event.getSlot();
-        ItemStack itemStack = slot.getItem();
-        if (itemStack.isEmpty()) return;
 
-        Optional<WynnItem> wynnItemOpt = Models.Item.getWynnItem(itemStack);
-        if (wynnItemOpt.isEmpty()) return;
-        if (!(wynnItemOpt.get() instanceof GearItem gearItem)) return;
-
-        Optional<GearInstance> gearInstanceOpt = gearItem.getItemInstance();
-        if (gearInstanceOpt.isEmpty()) return;
-
-        GearInstance gearInstance = gearInstanceOpt.get();
-        float pct;
-        try {
-            pct = ScoreComputation.computeScore(gearItem, gearInstance, SortState.getFilters());
-        } catch (Exception | NoClassDefFoundError e) {
-            LOG.error("ScoreComputation failed, disabling overlay until restart: {}", e.getMessage());
-            scoreComputationBroken = true;
-            return;
-        }
-        if (Float.isNaN(pct) || pct < 0.0f) return;
-
-        // Log first successful render per container (exploratory: container title, screen class, item info)
-        if (!firstRenderLogged) {
-            firstRenderLogged = true;
-            LOG.info("Overlay active: container='{}', screenClass={}, item={}, score={}%",
-                    containerTitle, containerScreen.getClass().getSimpleName(),
-                    gearItem.getItemInfo().name(), Math.round(pct));
-            LOG.event("overlay_active", Map.of("container", containerTitle, "screenClass", containerScreen.getClass().getSimpleName()));
-        }
+        // Look up cached score (computed once per frame in computeRanks)
+        Float cachedScore = slotScores.get(slot.index);
+        if (cachedScore == null) return;
+        float pct = cachedScore;
 
         // Sampled diagnostic logging (not every frame)
         diagnosticSampleCounter++;
         if (diagnosticSampleCounter >= DIAGNOSTIC_SAMPLE_RATE) {
             diagnosticSampleCounter = 0;
             try {
-                String itemName = gearItem.getItemInfo().name();
-                DiagnosticLog.event(DiagnosticLog.Category.OVERLAY, "score_computed",
-                        Map.of("item", itemName, "score", Math.round(pct)));
-            } catch (Exception e) { LOG.warn("Diagnostic sample failed", e); }
+                ItemStack itemStack = slot.getItem();
+                Optional<WynnItem> wynnItemOpt = Models.Item.getWynnItem(itemStack);
+                if (wynnItemOpt.isPresent() && wynnItemOpt.get() instanceof GearItem gearItem) {
+                    String itemName = gearItem.getItemInfo().name();
+                    DiagnosticLog.event(DiagnosticLog.Category.OVERLAY, "score_computed",
+                            Map.of("item", itemName, "score", Math.round(pct)));
+                }
+            } catch (Exception ignored) {}
         }
 
         GuiGraphics guiGraphics = event.getGuiGraphics();
@@ -153,10 +122,12 @@ public class QualityOverlayFeature {
 
     /**
      * Scans all slots in the container screen and computes a score for each gear item.
-     * Returns a map of slot index -> rank (1, 2, or 3) for the top 3.
+     * Populates slotScores (slot index -> score) for all valid items, and
+     * returns a map of slot index -> rank (1, 2, or 3) for the top 3.
      */
     private Map<Integer, Integer> computeRanks(AbstractContainerScreen<?> screen) {
         List<StatFilter> filters = SortState.getFilters();
+        Map<Integer, Float> scores = new HashMap<>();
         List<Map.Entry<Integer, Float>> entries = new ArrayList<>();
 
         for (Slot slot : screen.getMenu().slots) {
@@ -170,18 +141,15 @@ public class QualityOverlayFeature {
             Optional<GearInstance> gearInstanceOpt = gearItem.getItemInstance();
             if (gearInstanceOpt.isEmpty()) continue;
 
-            float score;
-            try {
-                score = ScoreComputation.computeScore(gearItem, gearInstanceOpt.get(), filters);
-            } catch (Exception | NoClassDefFoundError e) {
-                LOG.error("ScoreComputation failed in computeRanks, disabling overlay: {}", e.getMessage());
-                scoreComputationBroken = true;
-                return Collections.emptyMap();
-            }
+            float score = ScoreComputation.computeScore(gearItem, gearInstanceOpt.get(), filters);
             if (!Float.isNaN(score) && score >= 0.0f) {
+                scores.put(slot.index, score);
                 entries.add(Map.entry(slot.index, score));
             }
         }
+
+        // Store all scores for per-slot lookup in onSlotRender
+        slotScores = scores;
 
         // Need at least 2 items for ranking to be meaningful
         if (entries.size() < 2) {

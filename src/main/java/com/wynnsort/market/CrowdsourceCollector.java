@@ -2,22 +2,19 @@ package com.wynnsort.market;
 
 import com.wynnsort.WynnSortMod;
 import com.wynnsort.config.WynnSortConfig;
-import com.wynnsort.util.DiagnosticLog;
-import com.wynnsort.util.FeatureLogger;
 import com.wynnsort.util.ItemNameHelper;
 import com.wynntils.core.components.Models;
 import com.wynntils.mc.event.ContainerSetContentEvent;
 import com.wynntils.models.gear.type.GearInstance;
 import com.wynntils.models.items.WynnItem;
-import com.wynntils.models.items.items.game.*;
+import com.wynntils.models.items.items.game.GearItem;
+import com.wynntils.models.items.items.game.IngredientItem;
 import com.wynntils.models.trademarket.type.TradeMarketPriceInfo;
 import com.wynntils.models.trademarket.type.TradeMarketState;
 import net.minecraft.world.item.ItemStack;
 import net.neoforged.bus.api.SubscribeEvent;
 
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -36,12 +33,24 @@ import java.util.concurrent.TimeUnit;
 public class CrowdsourceCollector {
 
     public static final CrowdsourceCollector INSTANCE = new CrowdsourceCollector();
-    private static final FeatureLogger LOG = new FeatureLogger("Crowd", DiagnosticLog.Category.CROWDSOURCE);
 
     private static final String MOD_VERSION = "1.0.0";
 
+    /** Base delay for exponential backoff on flush failures (in milliseconds). */
+    private static final long BACKOFF_BASE_DELAY_MS = 30_000L; // 30 seconds
+    /** Maximum backoff delay between flush retries (in milliseconds). */
+    private static final long BACKOFF_MAX_DELAY_MS = 600_000L; // 10 minutes
+    /** Number of consecutive failures before permanently disabling flush. */
+    private static final int MAX_CONSECUTIVE_FAILURES = 10;
+
     private ScheduledExecutorService flushExecutor;
-    private boolean flushBroken = false;
+
+    /** Consecutive flush failure count for exponential backoff. */
+    private int flushFailureCount;
+    /** Earliest time (epoch ms) at which the next flush attempt is allowed. */
+    private long nextAllowedFlushTime;
+    /** Set to true after MAX_CONSECUTIVE_FAILURES, permanently disabling flush. */
+    private volatile boolean flushPermanentlyDisabled;
 
     private CrowdsourceCollector() {}
 
@@ -51,14 +60,6 @@ public class CrowdsourceCollector {
      */
     public void init() {
         CrowdsourceClient.INSTANCE.init();
-
-        // Pre-load CrowdsourceQueue on main thread to avoid classloader issues on daemon thread
-        try {
-            int preload = CrowdsourceQueue.INSTANCE.size();
-            LOG.info("CrowdsourceQueue pre-loaded (size: {})", preload);
-        } catch (Throwable t) {
-            LOG.warn("CrowdsourceQueue failed to pre-load: {}", t.getMessage());
-        }
 
         int flushMinutes = WynnSortConfig.INSTANCE.crowdsourceFlushMinutes;
         if (flushMinutes < 1) flushMinutes = 5;
@@ -78,12 +79,12 @@ public class CrowdsourceCollector {
 
         // Shutdown hook to flush remaining data
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            LOG.info("Crowdsource: shutdown hook — flushing remaining data");
+            WynnSortMod.log("[WS:Crowd] Shutdown hook — flushing remaining data");
             flushQueue();
             CrowdsourceClient.INSTANCE.shutdown();
         }, "WynnSort-CrowdsourceShutdown"));
 
-        LOG.info("CrowdsourceCollector initialized (flush every {} min)", flushMinutes);
+        WynnSortMod.log("[WS:Crowd] Collector initialized (flush every {} min)", flushMinutes);
     }
 
     @SubscribeEvent
@@ -119,18 +120,14 @@ public class CrowdsourceCollector {
                     }
                 }
             } catch (Exception e) {
-                LOG.warn("Crowdsource: error extracting entry from '{}'",
+                WynnSortMod.logWarn("[WS:Crowd] Error extracting entry from '{}'",
                         stack.getHoverName().getString());
             }
         }
 
         if (collected > 0) {
-            LOG.info("Crowdsource: collected {} new entries (queue size: {})",
+            WynnSortMod.log("[WS:Crowd] Collected {} new entries (queue size: {})",
                     collected, CrowdsourceQueue.INSTANCE.size());
-            Map<String, Object> evtData = new LinkedHashMap<>();
-            evtData.put("collected", collected);
-            evtData.put("queueSize", CrowdsourceQueue.INSTANCE.size());
-            LOG.event("batch_collected", evtData);
         }
     }
 
@@ -164,18 +161,14 @@ public class CrowdsourceCollector {
         if (wynnItem instanceof GearItem gearItem) {
             try {
                 rarity = gearItem.getItemInfo().tier().name();
-            } catch (Exception e) {
-                LOG.warn("Failed to get gear tier for '{}': {}", baseName, e.getMessage());
-            }
+            } catch (Exception ignored) {}
 
             Optional<GearInstance> instanceOpt = gearItem.getItemInstance();
             if (instanceOpt.isPresent()) {
                 identified = true;
                 try {
                     overallPct = instanceOpt.get().getOverallPercentage();
-                } catch (Exception e) {
-                    LOG.warn("Failed to get overall % for '{}': {}", baseName, e.getMessage());
-                }
+                } catch (Exception ignored) {}
             }
         }
 
@@ -187,9 +180,7 @@ public class CrowdsourceCollector {
                 if (hoverName != null) {
                     rarity = inferRarityFromType(wynnItem);
                 }
-            } catch (Exception e) {
-                LOG.warn("Failed to infer rarity for '{}': {}", baseName, e.getMessage());
-            }
+            } catch (Exception ignored) {}
         }
 
         return new CrowdsourceEntry(
@@ -218,31 +209,55 @@ public class CrowdsourceCollector {
             if (item instanceof IngredientItem ingredientItem) {
                 return "Tier" + ingredientItem.getIngredientInfo().tier();
             }
-        } catch (Exception e) {
-            LOG.warn("inferRarityFromType failed for {}: {}", item.getClass().getSimpleName(), e.getMessage());
-        }
+        } catch (Exception ignored) {}
         return "";
     }
 
     /**
      * Drains the queue and submits entries to storage.
+     * Uses exponential backoff on consecutive failures, permanently disabling
+     * after {@link #MAX_CONSECUTIVE_FAILURES} consecutive errors.
      */
     private void flushQueue() {
-        if (flushBroken) return;
+        if (flushPermanentlyDisabled) return;
+
+        // Respect backoff delay
+        long now = System.currentTimeMillis();
+        if (now < nextAllowedFlushTime) {
+            WynnSortMod.log("[WS:Crowd] Flush deferred — backoff active (failures: {}, next attempt in {}s)",
+                    flushFailureCount, (nextAllowedFlushTime - now) / 1000);
+            return;
+        }
+
         try {
             List<CrowdsourceEntry> entries = CrowdsourceQueue.INSTANCE.drain();
             if (entries.isEmpty()) return;
 
-            LOG.info("Crowdsource: flushing {} entries", entries.size());
+            WynnSortMod.log("[WS:Crowd] Flushing {} entries", entries.size());
             CrowdsourceClient.INSTANCE.submitBatch(entries);
-            Map<String, Object> evtData = new LinkedHashMap<>();
-            evtData.put("flushed", entries.size());
-            LOG.event("flush_completed", evtData);
+
+            // Success — reset backoff state
+            if (flushFailureCount > 0) {
+                WynnSortMod.log("[WS:Crowd] Flush succeeded after {} previous failure(s), resetting backoff",
+                        flushFailureCount);
+            }
+            flushFailureCount = 0;
+            nextAllowedFlushTime = 0;
         } catch (Exception e) {
-            LOG.error("Crowdsource: flush failed", e);
-            if (e.getMessage() != null && e.getMessage().contains("Failed to load class file")) {
-                LOG.error("Crowdsource: class loading failure, disabling flush");
-                flushBroken = true;
+            flushFailureCount++;
+
+            if (flushFailureCount >= MAX_CONSECUTIVE_FAILURES) {
+                flushPermanentlyDisabled = true;
+                WynnSortMod.logError("[WS:Crowd] Flush permanently disabled after {} consecutive failures",
+                        MAX_CONSECUTIVE_FAILURES);
+            } else {
+                long backoffMs = Math.min(
+                        (long) Math.pow(2, flushFailureCount) * BACKOFF_BASE_DELAY_MS,
+                        BACKOFF_MAX_DELAY_MS
+                );
+                nextAllowedFlushTime = System.currentTimeMillis() + backoffMs;
+                WynnSortMod.logWarn("[WS:Crowd] Flush failed (attempt {}/{}), next retry in {}s: {}",
+                        flushFailureCount, MAX_CONSECUTIVE_FAILURES, backoffMs / 1000, e.getMessage());
             }
         }
     }

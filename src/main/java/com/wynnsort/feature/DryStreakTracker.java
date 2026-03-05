@@ -27,7 +27,6 @@ import java.io.Reader;
 import java.io.Writer;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -309,73 +308,26 @@ public class DryStreakTracker implements HudRenderCallback {
         int screenWidth = mc.getWindow().getGuiScaledWidth();
         int screenHeight = mc.getWindow().getGuiScaledHeight();
 
-        // Position: bottom-right area, above hotbar
-        int boxWidth = 150;
-        int lineHeight = 11;
-        int padding = 4;
-
-        // Build lines to render
-        List<TextLine> lines = new ArrayList<>();
-
-        // Header
-        lines.add(new TextLine("Dry Streak", COLOR_HEADER));
-
-        // Current dry streak
+        // Compact display: just the dry streak count
         long dryPulls = data.totalPullsWithoutMythic;
         int dryColor = getDryStreakColor(dryPulls);
-        lines.add(new TextLine("Dry: " + dryPulls + " pulls", dryColor));
+        String text = "Dry: " + dryPulls + " pulls";
 
-        // Lifetime stats
-        lines.add(new TextLine("Lifetime: " + data.totalLifetimePulls + " pulls, "
-                + data.mythicsFound + " mythics", COLOR_LABEL));
+        int padding = 4;
+        int textWidth = mc.font.width(text);
+        int boxWidth = textWidth + padding * 2;
+        int boxHeight = mc.font.lineHeight + padding * 2;
 
-        // Expected mythic comparison (based on 1/2500 rate)
-        if (data.totalLifetimePulls > 0) {
-            double expectedMythics = data.totalLifetimePulls * MYTHIC_RATE;
-            lines.add(new TextLine(String.format("Expected: %.1f mythics (%d pulls)",
-                    expectedMythics, data.totalLifetimePulls), COLOR_LABEL));
-        }
-
-        // Percentile context for current dry streak
-        if (dryPulls > 0) {
-            double pctFound = (1.0 - Math.pow(1.0 - MYTHIC_RATE, dryPulls)) * 100.0;
-            lines.add(new TextLine(String.format("%.0f%% would have found one by now",
-                    pctFound), COLOR_LABEL));
-        }
-
-        // Longest dry streak (if meaningful)
-        if (data.longestDryStreak > 0) {
-            lines.add(new TextLine("Longest: " + data.longestDryStreak + " pulls",
-                    COLOR_LABEL));
-        }
-
-        // Last mythic found
-        if (data.lastMythicName != null && !data.lastMythicName.isEmpty()) {
-            String timeAgo = formatTimeAgo(data.lastMythicTimestamp);
-            lines.add(new TextLine("Last: " + data.lastMythicName + " (" + timeAgo + ")",
-                    COLOR_LABEL));
-        }
-
-        int boxHeight = padding * 2 + lines.size() * lineHeight;
-
-        // Position: bottom-right, above the hotbar (roughly)
+        // Position: bottom-right, above hotbar
         int x = screenWidth - boxWidth - 4;
         int y = screenHeight - boxHeight - 50;
 
         // Background
         guiGraphics.fill(x - 2, y - 2, x + boxWidth, y + boxHeight, 0x80000000);
-
-        // Render lines
-        int textY = y + padding;
-        for (TextLine line : lines) {
-            guiGraphics.drawString(mc.font, line.text, x + padding, textY, line.color);
-            textY += lineHeight;
-        }
+        guiGraphics.drawString(mc.font, text, x + padding, y + padding, dryColor);
     }
 
-    private record TextLine(String text, int color) {}
-
-    private static final double MYTHIC_RATE = 1.0 / 2500.0;
+    public static final double MYTHIC_RATE = 1.0 / 2500.0;
 
     private int getDryStreakColor(long pulls) {
         if (pulls >= 5000) return COLOR_RED;
@@ -384,7 +336,7 @@ public class DryStreakTracker implements HudRenderCallback {
         return COLOR_WHITE;
     }
 
-    private String formatTimeAgo(long timestamp) {
+    public static String formatTimeAgo(long timestamp) {
         if (timestamp <= 0) return "unknown";
 
         long elapsed = System.currentTimeMillis() - timestamp;

@@ -329,10 +329,21 @@ public class LootrunSessionStats implements HudRenderCallback {
         int padding = 4;
         int boxWidth = 150;
 
+        // Dry streak data (show if enabled)
+        DryStreakTracker.DryStreakData dryData = WynnSortConfig.INSTANCE.dryStreakEnabled
+                ? DryStreakTracker.INSTANCE.getData() : null;
+
         // Count visible lines
         int lineCount = 4; // header + challenges + pulls/rerolls + duration
         if (session.sacrifices > 0) lineCount++;
         if (!session.beaconCounts.isEmpty()) lineCount++;
+        if (dryData != null) {
+            lineCount++; // separator/header
+            if (dryData.totalLifetimePulls > 0) lineCount++; // lifetime
+            if (dryData.totalPullsWithoutMythic > 0) lineCount++; // percentile
+            if (dryData.longestDryStreak > 0) lineCount++; // longest
+            if (dryData.lastMythicName != null && !dryData.lastMythicName.isEmpty()) lineCount++; // last mythic
+        }
 
         int boxHeight = lineCount * lineHeight + padding * 2;
 
@@ -382,5 +393,39 @@ public class LootrunSessionStats implements HudRenderCallback {
         // Duration
         String durationText = "Time: " + session.getFormattedDuration();
         guiGraphics.drawString(mc.font, durationText, x + padding, textY, COLOR_DURATION);
+        textY += lineHeight;
+
+        // Dry streak details (lifetime stats, percentile, etc.)
+        if (dryData != null) {
+            guiGraphics.drawString(mc.font, "--- Mythic Stats ---", x + padding, textY, COLOR_HEADER);
+            textY += lineHeight;
+
+            if (dryData.totalLifetimePulls > 0) {
+                double expected = dryData.totalLifetimePulls * DryStreakTracker.MYTHIC_RATE;
+                String lifetimeText = String.format("%d pulls, %d mythics (%.1f exp)",
+                        dryData.totalLifetimePulls, dryData.mythicsFound, expected);
+                guiGraphics.drawString(mc.font, lifetimeText, x + padding, textY, COLOR_LABEL);
+                textY += lineHeight;
+            }
+
+            if (dryData.totalPullsWithoutMythic > 0) {
+                double pct = (1.0 - Math.pow(1.0 - DryStreakTracker.MYTHIC_RATE, dryData.totalPullsWithoutMythic)) * 100.0;
+                String pctText = String.format("%.0f%% would have found one", pct);
+                guiGraphics.drawString(mc.font, pctText, x + padding, textY, COLOR_LABEL);
+                textY += lineHeight;
+            }
+
+            if (dryData.longestDryStreak > 0) {
+                String longestText = "Longest dry: " + dryData.longestDryStreak + " pulls";
+                guiGraphics.drawString(mc.font, longestText, x + padding, textY, COLOR_LABEL);
+                textY += lineHeight;
+            }
+
+            if (dryData.lastMythicName != null && !dryData.lastMythicName.isEmpty()) {
+                String timeAgo = DryStreakTracker.formatTimeAgo(dryData.lastMythicTimestamp);
+                String lastText = "Last: " + dryData.lastMythicName + " (" + timeAgo + ")";
+                guiGraphics.drawString(mc.font, lastText, x + padding, textY, COLOR_LABEL);
+            }
+        }
     }
 }

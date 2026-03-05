@@ -21,8 +21,12 @@ public final class ItemNameHelper {
      * For GearItem: uses itemInfo.name(). For other game items: strips formatting
      * codes and "Unidentified " prefix from hover name. Returns null for
      * non-game items, emeralds, or on error.
+     *
+     * @param stack the item stack to extract a name from; if null, returns null
+     * @return the cleaned base name, or null if the item is not a recognized game item
      */
     public static String extractBaseName(ItemStack stack) {
+        if (stack == null) return null;
         try {
             Optional<WynnItem> opt = Models.Item.getWynnItem(stack);
             if (opt.isEmpty()) return null;
