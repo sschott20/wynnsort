@@ -62,6 +62,14 @@ public class LootrunSessionStats implements HudRenderCallback {
     private int lastRerolls = 0;
     private int lastSacrifices = 0;
 
+    /**
+     * Number of upcoming challenge completions whose pull reward is doubled by aqua beacon.
+     * Aqua beacon doubles ALL rewards from the next challenge, so completing a challenge
+     * while this counter is > 0 gives 2 pulls instead of 1.
+     * Normal aqua: 1 challenge doubled. Vibrant aqua: 2 challenges doubled.
+     */
+    private int pendingAquaChallenges = 0;
+
 
     private LootrunSessionStats() {}
 
@@ -163,6 +171,7 @@ public class LootrunSessionStats implements HudRenderCallback {
             lastChallengesCurrent = 0;
             lastRerolls = 0;
             lastSacrifices = 0;
+            pendingAquaChallenges = 0;
             LOG.event("session_started", Map.of("state", currentState.name()));
         }
 
@@ -211,9 +220,24 @@ public class LootrunSessionStats implements HudRenderCallback {
                 if (currentChallenges > lastChallengesCurrent) {
                     int delta = currentChallenges - lastChallengesCurrent;
                     currentSession.challengesCompleted = currentChallenges;
-                    currentSession.pullsEarned += delta;  // 1 pull per challenge completed
-                    LOG.info("Challenges updated: {} -> {} (+{}, pulls now {})",
-                            lastChallengesCurrent, currentChallenges, delta, currentSession.pullsEarned);
+
+                    // Each challenge gives 1 pull, but aqua beacon doubles the reward.
+                    // pendingAquaChallenges tracks how many upcoming challenges are boosted.
+                    int pullsFromChallenges = 0;
+                    for (int i = 0; i < delta; i++) {
+                        if (pendingAquaChallenges > 0) {
+                            pullsFromChallenges += 2;  // aqua doubles: 1 pull * 2 = 2 pulls
+                            pendingAquaChallenges--;
+                            LOG.info("Aqua-boosted challenge completion: 2 pulls (remaining aqua charges: {})",
+                                    pendingAquaChallenges);
+                        } else {
+                            pullsFromChallenges += 1;  // normal: 1 pull per challenge
+                        }
+                    }
+                    currentSession.pullsEarned += pullsFromChallenges;
+                    LOG.info("Challenges updated: {} -> {} (+{}, +{} pulls, pulls now {})",
+                            lastChallengesCurrent, currentChallenges, delta,
+                            pullsFromChallenges, currentSession.pullsEarned);
                 }
                 lastChallengesCurrent = currentChallenges;
             }
@@ -270,6 +294,13 @@ public class LootrunSessionStats implements HudRenderCallback {
                     currentSession.pullsEarned += pulls;
                     LOG.info("Dark gray beacon{}: +{} pulls (pulls now {})",
                             vibrant ? " (vibrant)" : "", pulls, currentSession.pullsEarned);
+                } else if (lastBeacon == LootrunBeaconKind.AQUA) {
+                    // Aqua beacon doubles ALL rewards from the next challenge completion.
+                    // Normal aqua: next 1 challenge doubled. Vibrant aqua: next 2 challenges doubled.
+                    int aquaCharges = vibrant ? 2 : 1;
+                    pendingAquaChallenges += aquaCharges;
+                    LOG.info("Aqua beacon{}: +{} aqua charge(s) (pending aqua challenges now {})",
+                            vibrant ? " (vibrant)" : "", aquaCharges, pendingAquaChallenges);
                 }
 
                 LOG.info("Beacon selected: {} (vibrant={}), total beacons: {}",
