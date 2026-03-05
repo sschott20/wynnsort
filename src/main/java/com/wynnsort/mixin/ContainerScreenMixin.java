@@ -256,6 +256,12 @@ public abstract class ContainerScreenMixin extends Screen {
         WynnSortConfig.save();
         if (wynnsort$noriButton != null) wynnsort$noriButton.setMessage(Component.literal(useWeighted ? "[Nori]" : "Nori"));
         if (wynnsort$overallButton != null) wynnsort$overallButton.setMessage(Component.literal(useWeighted ? "Overall" : "[Overall]"));
+
+        // Clear the stat filter so the scale mode applies cleanly
+        if (wynnsort$statInput != null) {
+            wynnsort$statInput.setValue("");
+        }
+
         if (this.minecraft != null && this.minecraft.player != null) {
             this.minecraft.player.displayClientMessage(
                     Component.literal("[WynnSort] Scale: " + (useWeighted ? "Nori/Wynnpool weighted" : "Overall average")), true);
