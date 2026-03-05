@@ -84,22 +84,6 @@ public class LootrunBeaconTracker implements HudRenderCallback {
         BEACON_COLORS.put(LootrunBeaconKind.RAINBOW,   0xFFFF44FF);
     }
 
-    /** Human-readable names for display. */
-    private static final Map<LootrunBeaconKind, String> BEACON_NAMES = new EnumMap<>(LootrunBeaconKind.class);
-    static {
-        BEACON_NAMES.put(LootrunBeaconKind.GREEN,     "Green");
-        BEACON_NAMES.put(LootrunBeaconKind.YELLOW,    "Yellow");
-        BEACON_NAMES.put(LootrunBeaconKind.BLUE,      "Blue");
-        BEACON_NAMES.put(LootrunBeaconKind.PURPLE,    "Purple");
-        BEACON_NAMES.put(LootrunBeaconKind.GRAY,      "Grey");
-        BEACON_NAMES.put(LootrunBeaconKind.ORANGE,    "Orange");
-        BEACON_NAMES.put(LootrunBeaconKind.RED,       "Red");
-        BEACON_NAMES.put(LootrunBeaconKind.DARK_GRAY, "Dark Grey");
-        BEACON_NAMES.put(LootrunBeaconKind.WHITE,     "White");
-        BEACON_NAMES.put(LootrunBeaconKind.AQUA,      "Aqua");
-        BEACON_NAMES.put(LootrunBeaconKind.CRIMSON,   "Crimson");
-        BEACON_NAMES.put(LootrunBeaconKind.RAINBOW,   "Rainbow");
-    }
 
     // ── Beacon tracking state ──────────────────────────────────────────
 
@@ -687,52 +671,11 @@ public class LootrunBeaconTracker implements HudRenderCallback {
     }
 
     /**
-     * Computes effective pull/curse/time/challenge values from the beacon choice log,
-     * accounting for vibrant doubling and aqua multipliers.
-     */
-    private BeaconEffectSummary computeEffectSummary() {
-        BeaconEffectSummary summary = new BeaconEffectSummary();
-        for (BeaconChoice choice : beaconChoiceLog) {
-            LootrunBeaconKind kind;
-            try {
-                kind = LootrunBeaconKind.valueOf(choice.beaconType);
-            } catch (IllegalArgumentException e) {
-                continue;
-            }
-            int vibrantMul = choice.vibrant ? 2 : 1;
-            switch (kind) {
-                case PURPLE -> {
-                    summary.effectivePulls += 1 * vibrantMul;
-                    summary.effectiveCurses += 1 * vibrantMul;
-                }
-                case DARK_GRAY -> {
-                    summary.effectivePulls += 3 * vibrantMul;
-                    summary.effectiveCurses += 3 * vibrantMul;
-                }
-                case GREEN -> summary.effectiveTimeBonus += 120 * vibrantMul;
-                case WHITE -> summary.effectiveChallenges += 5 * vibrantMul;
-                case RED -> summary.effectiveRedChallenges += 3 * vibrantMul;
-                default -> {}
-            }
-        }
-        return summary;
-    }
-
-    private static class BeaconEffectSummary {
-        int effectivePulls = 0;
-        int effectiveCurses = 0;
-        int effectiveTimeBonus = 0;
-        int effectiveChallenges = 0;
-        int effectiveRedChallenges = 0;
-    }
-
-    /**
      * Builds the list of HUD lines to display.
-     * Shows beacon counts with effective values, max-use indicators, and trade-off notes.
+     * Shows active beacon countdowns and cumulative beacon counts.
      */
     private List<HudLine> buildHudLines() {
         List<HudLine> lines = new ArrayList<>();
-        BeaconEffectSummary summary = computeEffectSummary();
 
         // Orange beacons - just show remaining count per beacon
         if (!orangeBeacons.isEmpty()) {
@@ -774,20 +717,6 @@ public class LootrunBeaconTracker implements HudRenderCallback {
         }
 
         return lines;
-    }
-
-    /**
-     * Check if the most recent choice of a given beacon type was vibrant,
-     * by looking through the choice log in reverse.
-     */
-    private boolean isVibrantFromLog(LootrunBeaconKind kind) {
-        for (int i = beaconChoiceLog.size() - 1; i >= 0; i--) {
-            BeaconChoice choice = beaconChoiceLog.get(i);
-            if (kind.name().equals(choice.beaconType)) {
-                return choice.vibrant;
-            }
-        }
-        return false;
     }
 
     private int getCountColor(int remaining) {

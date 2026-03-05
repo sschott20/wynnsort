@@ -67,7 +67,13 @@ public class QualityOverlayFeature {
         long currentFrame = mc.getFrameTimeNs();
         if (currentFrame != lastFrameCount) {
             lastFrameCount = currentFrame;
-            slotRanks = computeRanks(containerScreen);
+            try {
+                slotRanks = computeRanks(containerScreen);
+            } catch (Exception e) {
+                slotScores = Collections.emptyMap();
+                slotRanks = Collections.emptyMap();
+                return;
+            }
         }
 
         Slot slot = event.getSlot();

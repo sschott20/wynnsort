@@ -46,9 +46,9 @@ public class CrowdsourceCollector {
     private ScheduledExecutorService flushExecutor;
 
     /** Consecutive flush failure count for exponential backoff. */
-    private int flushFailureCount;
+    private volatile int flushFailureCount;
     /** Earliest time (epoch ms) at which the next flush attempt is allowed. */
-    private long nextAllowedFlushTime;
+    private volatile long nextAllowedFlushTime;
     /** Set to true after MAX_CONSECUTIVE_FAILURES, permanently disabling flush. */
     private volatile boolean flushPermanentlyDisabled;
 

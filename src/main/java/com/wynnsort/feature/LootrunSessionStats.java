@@ -327,7 +327,7 @@ public class LootrunSessionStats implements HudRenderCallback {
     private void renderSessionHud(GuiGraphics guiGraphics, Minecraft mc, LootrunSessionData session, boolean active) {
         int lineHeight = 11;
         int padding = 4;
-        int boxWidth = 150;
+        int boxWidth = 160;
 
         // Dry streak data (show if enabled)
         DryStreakTracker.DryStreakData dryData = WynnSortConfig.INSTANCE.dryStreakEnabled
@@ -335,6 +335,7 @@ public class LootrunSessionStats implements HudRenderCallback {
 
         // Count visible lines
         int lineCount = 4; // header + challenges + pulls/rerolls + duration
+        if (session.getEffectivePulls() > 0) lineCount++; // mythic chance line
         if (session.sacrifices > 0) lineCount++;
         if (!session.beaconCounts.isEmpty()) lineCount++;
         if (dryData != null) {
@@ -371,10 +372,22 @@ public class LootrunSessionStats implements HudRenderCallback {
         guiGraphics.drawString(mc.font, challengeText, x + padding, textY, COLOR_LABEL);
         textY += lineHeight;
 
-        // Pulls & Rerolls
+        // Pulls & Rerolls (with effective pulls)
+        int effectivePulls = session.getEffectivePulls();
         String pullsText = "Pulls: " + session.pullsEarned + " | Rerolls: " + session.rerollsEarned;
+        if (session.rerollsEarned > 0) {
+            pullsText += " (" + effectivePulls + " eff.)";
+        }
         guiGraphics.drawString(mc.font, pullsText, x + padding, textY, COLOR_LABEL);
         textY += lineHeight;
+
+        // Mythic chance based on effective pulls
+        if (effectivePulls > 0) {
+            double mythicChance = (1.0 - Math.pow(1.0 - DryStreakTracker.MYTHIC_RATE, effectivePulls)) * 100.0;
+            String mythicText = String.format("Mythic chance: %.1f%%", mythicChance);
+            guiGraphics.drawString(mc.font, mythicText, x + padding, textY, 0xFFFF55FF);
+            textY += lineHeight;
+        }
 
         // Sacrifices (only show if > 0)
         if (session.sacrifices > 0) {

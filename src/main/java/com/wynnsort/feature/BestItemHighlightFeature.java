@@ -47,7 +47,12 @@ public class BestItemHighlightFeature {
         long currentFrame = net.minecraft.client.Minecraft.getInstance().getFrameTimeNs();
         if (currentFrame != lastFrameTime) {
             lastFrameTime = currentFrame;
-            cachedBestSlot = findBestSlot(screen);
+            try {
+                cachedBestSlot = findBestSlot(screen);
+            } catch (Exception e) {
+                cachedBestSlot = null;
+                return;
+            }
         }
 
         Slot bestSlot = cachedBestSlot;
