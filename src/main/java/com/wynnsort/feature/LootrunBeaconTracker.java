@@ -5,6 +5,7 @@ import com.google.gson.GsonBuilder;
 import com.wynnsort.WynnSortMod;
 import com.wynnsort.config.WynnSortConfig;
 import com.wynnsort.util.DiagnosticLog;
+import com.wynnsort.util.FeatureLogger;
 import com.wynntils.core.components.Models;
 import com.wynntils.models.lootrun.beacons.LootrunBeaconKind;
 import com.wynntils.models.lootrun.type.LootrunningState;
@@ -53,6 +54,7 @@ import java.util.Map;
 public class LootrunBeaconTracker implements HudRenderCallback {
 
     public static final LootrunBeaconTracker INSTANCE = new LootrunBeaconTracker();
+    private static final FeatureLogger LOG = new FeatureLogger("Beacon", DiagnosticLog.Category.BEACON);
 
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static final Path STATE_PATH =
@@ -169,6 +171,7 @@ public class LootrunBeaconTracker implements HudRenderCallback {
         try {
             currentState = Models.Lootrun.getState();
         } catch (Exception e) {
+            LOG.warn("Models.Lootrun.getState() failed: {}", e.getMessage());
             return;
         }
 
@@ -176,16 +179,25 @@ public class LootrunBeaconTracker implements HudRenderCallback {
         hudLogTick++;
         if (hudLogTick >= 100) {
             hudLogTick = 0;
-            WynnSortMod.log("[WynnSort] HUD tick: lootrunState={}, lastState={}, orangeBeacons={}, " +
+            LOG.info("HUD tick: lootrunState={} (class={}), lastState={}, orangeBeacons={}, " +
                             "rainbowRemaining={}, aquaPending={}, beaconCounts={}, bootstrapped={}",
-                    currentState, lastState, orangeBeacons, rainbowRemaining,
-                    aquaPending, beaconCounts, bootstrapped);
+                    currentState, currentState.getClass().getName(), lastState, orangeBeacons,
+                    rainbowRemaining, aquaPending, beaconCounts, bootstrapped);
+            // Exploratory: log raw Wynntils API beacon values
+            try {
+                LOG.info("  API raw: getState()={}, activeOrange={}, activeRainbow={}",
+                        Models.Lootrun.getState().name(),
+                        Models.Lootrun.getActiveOrangeBeacons(),
+                        Models.Lootrun.getActiveRainbowBeacons());
+            } catch (Exception ex) {
+                LOG.warn("  API raw beacon query failed: {}", ex.getMessage());
+            }
         }
 
         // Clear on lootrun end
         if (currentState == LootrunningState.NOT_RUNNING) {
             if (lastState != LootrunningState.NOT_RUNNING) {
-                WynnSortMod.log("[WynnSort] Lootrun ended (was {}), clearing all", lastState);
+                LOG.info("Lootrun ended (was {}), clearing all", lastState);
                 DiagnosticLog.event(DiagnosticLog.Category.LOOTRUN, "run_completed",
                         Map.of("orangeBeacons", orangeBeacons.size(),
                                 "rainbowRemaining", rainbowRemaining,
@@ -199,7 +211,7 @@ public class LootrunBeaconTracker implements HudRenderCallback {
 
         // Log state transitions
         if (currentState != lastState) {
-            WynnSortMod.log("[WynnSort] Lootrun state: {} -> {}", lastState, currentState);
+            LOG.info("Lootrun state: {} -> {}", lastState, currentState);
             DiagnosticLog.event(DiagnosticLog.Category.LOOTRUN, "state_change",
                     Map.of("from", String.valueOf(lastState), "to", String.valueOf(currentState)));
         }
@@ -209,7 +221,9 @@ public class LootrunBeaconTracker implements HudRenderCallback {
             try {
                 snapshotOrangeCount = Models.Lootrun.getActiveOrangeBeacons();
                 snapshotRainbowCount = Models.Lootrun.getActiveRainbowBeacons();
+                LOG.info("CHOOSING_BEACON snapshot: orange={}, rainbow={}", snapshotOrangeCount, snapshotRainbowCount);
             } catch (Exception e) {
+                LOG.warn("Failed to snapshot beacon counts from API: {}", e.getMessage());
                 snapshotOrangeCount = orangeBeacons.size();
                 snapshotRainbowCount = rainbowRemaining >= 0 ? 1 : 0;
             }
@@ -222,7 +236,7 @@ public class LootrunBeaconTracker implements HudRenderCallback {
 
         // Bootstrap on first active lootrun detection (after relog or mod load)
         if (!bootstrapped) {
-            WynnSortMod.log("[WynnSort] First active lootrun detection, bootstrapping...");
+            LOG.info("First active lootrun detection, bootstrapping...");
             bootstrapFromSavedState();
             bootstrapped = true;
         }
@@ -261,10 +275,11 @@ public class LootrunBeaconTracker implements HudRenderCallback {
         try {
             selectedKind = Models.Lootrun.getLastTaskBeaconColor();
             wasVibrant = Models.Lootrun.wasLastBeaconVibrant();
-            WynnSortMod.log("[WynnSort] Beacon selected via API: kind={}, vibrant={}",
-                    selectedKind, wasVibrant);
+            LOG.info("Beacon selected via API: kind={}, kindClass={}, vibrant={}, rawEnum={}",
+                    selectedKind, selectedKind != null ? selectedKind.getClass().getName() : "null",
+                    wasVibrant, selectedKind != null ? selectedKind.name() : "null");
         } catch (Exception e) {
-            WynnSortMod.log("[WynnSort] getLastTaskBeaconColor() unavailable, falling back to count comparison");
+            LOG.warn("getLastTaskBeaconColor() unavailable ({}), falling back to count comparison", e.getMessage());
         }
 
         // Fallback: if API didn't return a result, use count comparison
@@ -286,13 +301,13 @@ public class LootrunBeaconTracker implements HudRenderCallback {
 
         // Process the selected beacon
         if (selectedKind == null) {
-            WynnSortMod.logWarn("[WynnSort] Could not determine beacon type, consuming aqua only");
+            LOG.warn("Could not determine beacon type, consuming aqua only");
             consumeAqua();
         } else {
             processBeaconSelection(selectedKind, wasVibrant);
         }
 
-        WynnSortMod.log("[WynnSort]   Post state: orange={}, rainbow={}, aquaPending={}, counts={}",
+        LOG.info("  Post state: orange={}, rainbow={}, aquaPending={}, counts={}",
                 orangeBeacons, rainbowRemaining, aquaPending, beaconCounts);
         saveState();
     }
@@ -308,11 +323,11 @@ public class LootrunBeaconTracker implements HudRenderCallback {
             currentOrange = Models.Lootrun.getActiveOrangeBeacons();
             currentRainbow = Models.Lootrun.getActiveRainbowBeacons();
         } catch (Exception e) {
-            WynnSortMod.logWarn("[WynnSort] Failed to read beacon counts from Wynntils", e);
+            LOG.warn("Failed to read beacon counts from Wynntils: {}", e.getMessage());
             return null;
         }
 
-        WynnSortMod.log("[WynnSort] Count comparison: orange {} -> {}, rainbow {} -> {}",
+        LOG.info("Count comparison: orange {} -> {}, rainbow {} -> {}",
                 snapshotOrangeCount, currentOrange, snapshotRainbowCount, currentRainbow);
 
         if (currentOrange > snapshotOrangeCount) {
@@ -337,7 +352,7 @@ public class LootrunBeaconTracker implements HudRenderCallback {
                 boolean isVibrant = wasVibrant || rainbowRemaining > 0;
                 int duration = calculateDuration(5, isVibrant);
                 orangeBeacons.add(duration);
-                WynnSortMod.log("[WynnSort]   -> ORANGE{}: +{} challenges (aqua={})",
+                LOG.info("  -> ORANGE{}: +{} challenges (aqua={})",
                         vibrantMarker, duration, aquaPending);
                 consumeAqua();
             }
@@ -345,7 +360,7 @@ public class LootrunBeaconTracker implements HudRenderCallback {
                 boolean isVibrant = wasVibrant || rainbowRemaining > 0;
                 int duration = calculateDuration(10, isVibrant);
                 rainbowRemaining = Math.max(rainbowRemaining, 0) + duration;
-                WynnSortMod.log("[WynnSort]   -> RAINBOW{}: +{} (total={})",
+                LOG.info("  -> RAINBOW{}: +{} (total={})",
                         vibrantMarker, duration, rainbowRemaining);
                 consumeAqua();
             }
@@ -353,66 +368,66 @@ public class LootrunBeaconTracker implements HudRenderCallback {
                 incrementBeaconCount(LootrunBeaconKind.AQUA);
                 aquaPending = true;
                 aquaWasVibrant = wasVibrant || rainbowRemaining > 0;
-                WynnSortMod.log("[WynnSort]   -> AQUA{}: boost pending, vibrant={}",
+                LOG.info("  -> AQUA{}: boost pending, vibrant={}",
                         vibrantMarker, aquaWasVibrant);
                 // Don't consume aqua - aqua sets it
             }
             case BLUE -> {
                 incrementBeaconCount(LootrunBeaconKind.BLUE);
-                WynnSortMod.log("[WynnSort]   -> BLUE{}: {} boons",
+                LOG.info("  -> BLUE{}: {} boons",
                         vibrantMarker, getBeaconCount(LootrunBeaconKind.BLUE));
                 consumeAqua();
             }
             case PURPLE -> {
                 incrementBeaconCount(LootrunBeaconKind.PURPLE);
-                WynnSortMod.log("[WynnSort]   -> PURPLE{}: {} curses/pulls",
+                LOG.info("  -> PURPLE{}: {} curses/pulls",
                         vibrantMarker, getBeaconCount(LootrunBeaconKind.PURPLE));
                 consumeAqua();
             }
             case YELLOW -> {
                 incrementBeaconCount(LootrunBeaconKind.YELLOW);
-                WynnSortMod.log("[WynnSort]   -> YELLOW{}: {} chests",
+                LOG.info("  -> YELLOW{}: {} chests",
                         vibrantMarker, getBeaconCount(LootrunBeaconKind.YELLOW));
                 consumeAqua();
             }
             case CRIMSON -> {
                 incrementBeaconCount(LootrunBeaconKind.CRIMSON);
-                WynnSortMod.log("[WynnSort]   -> CRIMSON{}: {} trials",
+                LOG.info("  -> CRIMSON{}: {} trials",
                         vibrantMarker, getBeaconCount(LootrunBeaconKind.CRIMSON));
                 consumeAqua();
             }
             case GREEN -> {
                 incrementBeaconCount(LootrunBeaconKind.GREEN);
-                WynnSortMod.log("[WynnSort]   -> GREEN{}: {} uses",
+                LOG.info("  -> GREEN{}: {} uses",
                         vibrantMarker, getBeaconCount(LootrunBeaconKind.GREEN));
                 consumeAqua();
             }
             case DARK_GRAY -> {
                 incrementBeaconCount(LootrunBeaconKind.DARK_GRAY);
-                WynnSortMod.log("[WynnSort]   -> DARK_GRAY{}: used (max 1/run)",
+                LOG.info("  -> DARK_GRAY{}: used (max 1/run)",
                         vibrantMarker);
                 consumeAqua();
             }
             case WHITE -> {
                 incrementBeaconCount(LootrunBeaconKind.WHITE);
-                WynnSortMod.log("[WynnSort]   -> WHITE{}: +5 challenges",
+                LOG.info("  -> WHITE{}: +5 challenges",
                         vibrantMarker);
                 consumeAqua();
             }
             case GRAY -> {
                 incrementBeaconCount(LootrunBeaconKind.GRAY);
-                WynnSortMod.log("[WynnSort]   -> GRAY{}: {} missions",
+                LOG.info("  -> GRAY{}: {} missions",
                         vibrantMarker, getBeaconCount(LootrunBeaconKind.GRAY));
                 consumeAqua();
             }
             case RED -> {
                 incrementBeaconCount(LootrunBeaconKind.RED);
-                WynnSortMod.log("[WynnSort]   -> RED{}: {} uses",
+                LOG.info("  -> RED{}: {} uses",
                         vibrantMarker, getBeaconCount(LootrunBeaconKind.RED));
                 consumeAqua();
             }
             default -> {
-                WynnSortMod.log("[WynnSort]   -> UNKNOWN beacon kind: {}", kind);
+                LOG.info("  -> UNKNOWN beacon kind: {}", kind);
                 consumeAqua();
             }
         }
@@ -464,6 +479,7 @@ public class LootrunBeaconTracker implements HudRenderCallback {
         try {
             return Models.Lootrun.getChallenges().current();
         } catch (Exception e) {
+            LOG.warn("getChallenges() failed: {}", e.getMessage());
             return -1;
         }
     }
@@ -509,7 +525,7 @@ public class LootrunBeaconTracker implements HudRenderCallback {
                 GSON.toJson(state, writer);
             }
         } catch (IOException e) {
-            WynnSortMod.logWarn("[WynnSort] Failed to save lootrun state", e);
+            LOG.warn("Failed to save lootrun state: {}", e.getMessage());
         }
     }
 
@@ -517,7 +533,7 @@ public class LootrunBeaconTracker implements HudRenderCallback {
         try {
             Files.deleteIfExists(STATE_PATH);
         } catch (IOException e) {
-            // ignore
+            LOG.warn("Failed to delete state file: {}", e.getMessage());
         }
     }
 
@@ -527,7 +543,7 @@ public class LootrunBeaconTracker implements HudRenderCallback {
                 SavedState state = GSON.fromJson(reader, SavedState.class);
                 if (state != null) {
                     long ageMinutes = (System.currentTimeMillis() - state.savedAt) / 60000;
-                    WynnSortMod.log("[WynnSort] Found saved state ({}m old): orange={}, rainbow={}, " +
+                    LOG.info("Found saved state ({}m old): orange={}, rainbow={}, " +
                                     "aquaPending={}, counts={}",
                             ageMinutes, state.orangeBeacons, state.rainbowRemaining,
                             state.aquaPending, state.beaconCounts);
@@ -547,7 +563,7 @@ public class LootrunBeaconTracker implements HudRenderCallback {
                                     LootrunBeaconKind kind = LootrunBeaconKind.valueOf(entry.getKey());
                                     beaconCounts.put(kind, entry.getValue());
                                 } catch (IllegalArgumentException e) {
-                                    WynnSortMod.logWarn("[WynnSort] Unknown beacon kind in saved state: {}",
+                                    LOG.warn("Unknown beacon kind in saved state: {}",
                                             entry.getKey());
                                 }
                             }
@@ -559,14 +575,14 @@ public class LootrunBeaconTracker implements HudRenderCallback {
                             beaconChoiceLog.addAll(state.beaconChoiceLog);
                         }
 
-                        WynnSortMod.log("[WynnSort] Restored beacon state from disk");
+                        LOG.info("Restored beacon state from disk");
                         return;
                     } else {
-                        WynnSortMod.log("[WynnSort] Saved state too old ({}m), ignoring", ageMinutes);
+                        LOG.info("Saved state too old ({}m), ignoring", ageMinutes);
                     }
                 }
             } catch (Exception e) {
-                WynnSortMod.logWarn("[WynnSort] Failed to load saved state", e);
+                LOG.warn("Failed to load saved state: {}", e.getMessage());
             }
         }
 
@@ -575,27 +591,27 @@ public class LootrunBeaconTracker implements HudRenderCallback {
     }
 
     private void bootstrapFromWynntils() {
-        WynnSortMod.log("[WynnSort] Bootstrapping from Wynntils API...");
+        LOG.info("Bootstrapping from Wynntils API...");
         try {
             // Bootstrap orange beacons
             int orangeCount = 0;
-            try { orangeCount = Models.Lootrun.getActiveOrangeBeacons(); } catch (Exception e) { /* ignore */ }
+            try { orangeCount = Models.Lootrun.getActiveOrangeBeacons(); } catch (Exception e) { LOG.warn("getActiveOrangeBeacons() failed: {}", e.getMessage()); }
 
             if (orangeCount > 0 && orangeBeacons.isEmpty()) {
                 int nextExpiry = -1;
-                try { nextExpiry = Models.Lootrun.getChallengesTillNextOrangeExpires(); } catch (Exception e) { /* ignore */ }
+                try { nextExpiry = Models.Lootrun.getChallengesTillNextOrangeExpires(); } catch (Exception e) { LOG.warn("getChallengesTillNextOrangeExpires() failed: {}", e.getMessage()); }
                 if (nextExpiry > 0) orangeBeacons.add(nextExpiry);
                 for (int i = orangeBeacons.size(); i < orangeCount; i++) orangeBeacons.add(-1);
-                WynnSortMod.log("[WynnSort]   Bootstrapped {} orange beacon(s) (first={})", orangeCount, nextExpiry);
+                LOG.info("  Bootstrapped {} orange beacon(s) (first={})", orangeCount, nextExpiry);
             }
 
             // Bootstrap rainbow beacons
             int rainbowCount = 0;
-            try { rainbowCount = Models.Lootrun.getActiveRainbowBeacons(); } catch (Exception e) { /* ignore */ }
+            try { rainbowCount = Models.Lootrun.getActiveRainbowBeacons(); } catch (Exception e) { LOG.warn("getActiveRainbowBeacons() failed: {}", e.getMessage()); }
 
             if (rainbowCount > 0 && rainbowRemaining < 0) {
                 rainbowRemaining = 0;
-                WynnSortMod.log("[WynnSort]   Bootstrapped rainbow beacon");
+                LOG.info("  Bootstrapped rainbow beacon");
             }
 
             // Bootstrap per-type counts from Wynntils API
@@ -605,16 +621,16 @@ public class LootrunBeaconTracker implements HudRenderCallback {
                     int apiCount = Models.Lootrun.getBeaconCount(kind);
                     if (apiCount > 0) {
                         beaconCounts.put(kind, apiCount);
-                        WynnSortMod.log("[WynnSort]   Bootstrapped {} count: {}", kind, apiCount);
+                        LOG.info("  Bootstrapped {} count: {}", kind, apiCount);
                     }
                 } catch (Exception e) {
-                    // API may not support all kinds, ignore
+                    LOG.warn("getBeaconCount({}) failed: {}", kind, e.getMessage());
                 }
             }
         } catch (Exception e) {
-            WynnSortMod.logWarn("[WynnSort] Bootstrap from Wynntils failed", e);
+            LOG.warn("Bootstrap from Wynntils failed: {}", e.getMessage());
         }
-        WynnSortMod.log("[WynnSort] Bootstrap result: orange={}, rainbow={}, counts={}",
+        LOG.info("Bootstrap result: orange={}, rainbow={}, counts={}",
                 orangeBeacons, rainbowRemaining, beaconCounts);
     }
 

@@ -2,6 +2,8 @@ package com.wynnsort.market;
 
 import com.wynnsort.WynnSortMod;
 import com.wynnsort.config.WynnSortConfig;
+import com.wynnsort.util.DiagnosticLog;
+import com.wynnsort.util.FeatureLogger;
 import com.wynnsort.util.ItemNameHelper;
 import com.wynntils.core.components.Models;
 import com.wynntils.mc.event.ContainerSetContentEvent;
@@ -13,7 +15,9 @@ import com.wynntils.models.trademarket.type.TradeMarketState;
 import net.minecraft.world.item.ItemStack;
 import net.neoforged.bus.api.SubscribeEvent;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -32,6 +36,7 @@ import java.util.concurrent.TimeUnit;
 public class CrowdsourceCollector {
 
     public static final CrowdsourceCollector INSTANCE = new CrowdsourceCollector();
+    private static final FeatureLogger LOG = new FeatureLogger("Crowd", DiagnosticLog.Category.CROWDSOURCE);
 
     private static final String MOD_VERSION = "1.0.0";
 
@@ -64,12 +69,12 @@ public class CrowdsourceCollector {
 
         // Shutdown hook to flush remaining data
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            WynnSortMod.log("[WynnSort] Crowdsource: shutdown hook — flushing remaining data");
+            LOG.info("Crowdsource: shutdown hook — flushing remaining data");
             flushQueue();
             CrowdsourceClient.INSTANCE.shutdown();
         }, "WynnSort-CrowdsourceShutdown"));
 
-        WynnSortMod.log("[WynnSort] CrowdsourceCollector initialized (flush every {} min)", flushMinutes);
+        LOG.info("CrowdsourceCollector initialized (flush every {} min)", flushMinutes);
     }
 
     @SubscribeEvent
@@ -105,14 +110,18 @@ public class CrowdsourceCollector {
                     }
                 }
             } catch (Exception e) {
-                WynnSortMod.logWarn("[WynnSort] Crowdsource: error extracting entry from '{}'",
+                LOG.warn("Crowdsource: error extracting entry from '{}'",
                         stack.getHoverName().getString());
             }
         }
 
         if (collected > 0) {
-            WynnSortMod.log("[WynnSort] Crowdsource: collected {} new entries (queue size: {})",
+            LOG.info("Crowdsource: collected {} new entries (queue size: {})",
                     collected, CrowdsourceQueue.INSTANCE.size());
+            Map<String, Object> evtData = new LinkedHashMap<>();
+            evtData.put("collected", collected);
+            evtData.put("queueSize", CrowdsourceQueue.INSTANCE.size());
+            LOG.event("batch_collected", evtData);
         }
     }
 
@@ -146,14 +155,18 @@ public class CrowdsourceCollector {
         if (wynnItem instanceof GearItem gearItem) {
             try {
                 rarity = gearItem.getItemInfo().tier().name();
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                LOG.warn("Failed to get gear tier for '{}': {}", baseName, e.getMessage());
+            }
 
             Optional<GearInstance> instanceOpt = gearItem.getItemInstance();
             if (instanceOpt.isPresent()) {
                 identified = true;
                 try {
                     overallPct = instanceOpt.get().getOverallPercentage();
-                } catch (Exception ignored) {}
+                } catch (Exception e) {
+                    LOG.warn("Failed to get overall % for '{}': {}", baseName, e.getMessage());
+                }
             }
         }
 
@@ -165,7 +178,9 @@ public class CrowdsourceCollector {
                 if (hoverName != null) {
                     rarity = inferRarityFromType(wynnItem);
                 }
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                LOG.warn("Failed to infer rarity for '{}': {}", baseName, e.getMessage());
+            }
         }
 
         return new CrowdsourceEntry(
@@ -194,7 +209,9 @@ public class CrowdsourceCollector {
             if (item instanceof IngredientItem ingredientItem) {
                 return "Tier" + ingredientItem.getIngredientInfo().tier();
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            LOG.warn("inferRarityFromType failed for {}: {}", item.getClass().getSimpleName(), e.getMessage());
+        }
         return "";
     }
 
@@ -206,10 +223,13 @@ public class CrowdsourceCollector {
             List<CrowdsourceEntry> entries = CrowdsourceQueue.INSTANCE.drain();
             if (entries.isEmpty()) return;
 
-            WynnSortMod.log("[WynnSort] Crowdsource: flushing {} entries", entries.size());
+            LOG.info("Crowdsource: flushing {} entries", entries.size());
             CrowdsourceClient.INSTANCE.submitBatch(entries);
+            Map<String, Object> evtData = new LinkedHashMap<>();
+            evtData.put("flushed", entries.size());
+            LOG.event("flush_completed", evtData);
         } catch (Exception e) {
-            WynnSortMod.logError("[WynnSort] Crowdsource: flush failed", e);
+            LOG.error("Crowdsource: flush failed", e);
         }
     }
 }

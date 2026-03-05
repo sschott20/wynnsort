@@ -4,6 +4,8 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.reflect.TypeToken;
 import com.wynnsort.WynnSortMod;
+import com.wynnsort.util.DiagnosticLog;
+import com.wynnsort.util.FeatureLogger;
 import net.fabricmc.loader.api.FabricLoader;
 
 import java.io.IOException;
@@ -15,10 +17,12 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 public class SearchPresetStore {
 
+    private static final FeatureLogger LOG = new FeatureLogger("Preset", DiagnosticLog.Category.PERSISTENCE);
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static final Path STORE_PATH = FabricLoader.getInstance().getConfigDir()
             .resolve("wynnsort").resolve("search_presets.json");
@@ -34,10 +38,11 @@ public class SearchPresetStore {
                 if (loaded != null) {
                     presets.clear();
                     presets.addAll(loaded);
-                    WynnSortMod.log("Loaded {} search presets from {}", presets.size(), STORE_PATH);
+                    LOG.info("Loaded {} search presets from {}", presets.size(), STORE_PATH);
+                    LOG.event("store_loaded", Map.of("count", presets.size()));
                 }
             } catch (IOException e) {
-                WynnSortMod.logError("Failed to load search presets", e);
+                LOG.error("Failed to load search presets", e);
             }
         }
     }
@@ -48,9 +53,10 @@ public class SearchPresetStore {
             try (Writer writer = Files.newBufferedWriter(STORE_PATH)) {
                 GSON.toJson(presets, LIST_TYPE, writer);
             }
-            WynnSortMod.log("Saved {} search presets to {}", presets.size(), STORE_PATH);
+            LOG.info("Saved {} search presets to {}", presets.size(), STORE_PATH);
+            LOG.event("store_saved", Map.of("count", presets.size()));
         } catch (IOException e) {
-            WynnSortMod.logError("Failed to save search presets", e);
+            LOG.error("Failed to save search presets", e);
         }
     }
 
@@ -60,7 +66,7 @@ public class SearchPresetStore {
 
     public static void addPreset(SearchPreset preset) {
         if (presets.size() >= MAX_PRESETS) {
-            WynnSortMod.logWarn("Cannot add preset: maximum of {} presets reached", MAX_PRESETS);
+            LOG.warn("Cannot add preset: maximum of {} presets reached", MAX_PRESETS);
             return;
         }
         presets.add(preset);

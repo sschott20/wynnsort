@@ -37,7 +37,7 @@ import java.util.stream.Collectors;
 /**
  * Comprehensive trade market observer. Has two responsibilities:
  *
- * 1. LOGGING — structured, permanent log entries prefixed [TM] that record
+ * 1. LOGGING — structured, permanent log entries prefixed [WS:TM] that record
  *    every state transition, container snapshot, slot update, chat message,
  *    and Wynntils API value while the trade market is active.
  *
@@ -101,13 +101,13 @@ public class TradeMarketLogger {
     private TradeMarketLogger() {}
 
     private static void tmLog(String msg, Object... args) {
-        TM.info(msg, args);
-        PersistentLog.info(msg, args);
+        TM.info("[WS:TM] " + msg, args);
+        PersistentLog.info("[WS:TM] " + msg, args);
     }
 
     private static void tmWarn(String msg, Object... args) {
-        TM.warn(msg, args);
-        PersistentLog.warn(msg, args);
+        TM.warn("[WS:TM] " + msg, args);
+        PersistentLog.warn("[WS:TM] " + msg, args);
     }
 
     /** Returns the matched buy record for the current sell screen, or null. */
@@ -125,7 +125,7 @@ public class TradeMarketLogger {
         TradeMarketState newState = event.getNewState();
 
         if (WynnSortConfig.INSTANCE.tradeMarketLogging) {
-            tmLog("[TM] State change: {} -> {}", oldState, newState);
+            tmLog("State change: {} -> {}", oldState, newState);
             logApiSnapshot("state-change");
         }
 
@@ -153,7 +153,7 @@ public class TradeMarketLogger {
         String screenClass = screen != null ? screen.getClass().getSimpleName() : "null";
         String screenTitle = screen != null ? screen.getTitle().getString() : "null";
 
-        tmLog("[TM] Screen opened: class={}, title=\"{}\"", screenClass, screenTitle);
+        tmLog("Screen opened: class={}, title=\"{}\"", screenClass, screenTitle);
         logContainerInfo("screen-open");
     }
 
@@ -161,7 +161,7 @@ public class TradeMarketLogger {
     public void onScreenClose(ScreenClosedEvent.Post event) {
         if (!WynnSortConfig.INSTANCE.tradeMarketLogging) return;
         if (lastKnownState != TradeMarketState.NOT_ACTIVE) {
-            tmLog("[TM] Screen closed (was in state: {})", lastKnownState);
+            tmLog("Screen closed (was in state: {})", lastKnownState);
         }
     }
 
@@ -193,7 +193,7 @@ public class TradeMarketLogger {
 
         logContainerInfo("content-update");
 
-        tmLog("[TM] Container content: containerId={}, stateId={}, {} slots, state={}",
+        tmLog("Container content: containerId={}, stateId={}, {} slots, state={}",
                 event.getContainerId(), event.getStateId(), items.size(), state);
 
         for (int i = 0; i < items.size(); i++) {
@@ -220,9 +220,9 @@ public class TradeMarketLogger {
 
         if (WynnSortConfig.INSTANCE.tradeMarketLogging) {
             if (stack == null || stack.isEmpty()) {
-                tmLog("[TM] Slot cleared: container={}, slot={}", containerId, slot);
+                tmLog("Slot cleared: container={}, slot={}", containerId, slot);
             } else {
-                tmLog("[TM] Slot updated: container={}, slot={}", containerId, slot);
+                tmLog("Slot updated: container={}, slot={}", containerId, slot);
                 logSlotItem(slot, stack);
             }
         }
@@ -234,13 +234,13 @@ public class TradeMarketLogger {
                 long price = extractPriceFromStack(stack);
                 if (price > 0) {
                     pendingPrice = price;
-                    tmLog("[TM] Buy price captured from slot update {}: {}", slot, price);
+                    tmLog("Buy price captured from slot update {}: {}", slot, price);
                 }
             } else if (state == TradeMarketState.SELLING && pendingSellPrice < 0) {
                 long price = extractPriceFromStack(stack);
                 if (price > 0) {
                     pendingSellPrice = price;
-                    tmLog("[TM] Sell price captured from slot update {}: {}", slot, price);
+                    tmLog("Sell price captured from slot update {}: {}", slot, price);
                 }
             }
         }
@@ -264,7 +264,7 @@ public class TradeMarketLogger {
         try { msgType = event.getMessageType().toString(); } catch (Exception ignored) {}
 
         if (WynnSortConfig.INSTANCE.tradeMarketLogging && isTradeMarketRelevant()) {
-            tmLog("[TM] Chat [{}]: \"{}\"", msgType, msg);
+            tmLog("Chat [{}]: \"{}\"", msgType, msg);
         }
 
         if (!WynnSortConfig.INSTANCE.tradeHistoryEnabled) return;
@@ -274,25 +274,25 @@ public class TradeMarketLogger {
             Matcher buyMatch = FINISHED_BUYING_PATTERN.matcher(msg);
             if (buyMatch.find()) {
                 lastFinishedItemName = ItemNameHelper.cleanItemName(buyMatch.group(1));
-                tmLog("[TM] Finished buying: \"{}\"", lastFinishedItemName);
+                tmLog("Finished buying: \"{}\"", lastFinishedItemName);
             }
             Matcher sellMatch = FINISHED_SELLING_PATTERN.matcher(msg);
             if (sellMatch.find()) {
                 lastFinishedItemName = ItemNameHelper.cleanItemName(sellMatch.group(1));
-                tmLog("[TM] Finished selling: \"{}\"", lastFinishedItemName);
+                tmLog("Finished selling: \"{}\"", lastFinishedItemName);
             }
 
             if (CLAIM_ITEMS_PATTERN.matcher(msg).find()) {
-                tmLog("[TM] >>> BUY confirmation detected");
+                tmLog(">>> BUY confirmation detected");
                 logApiSnapshot("buy-confirm");
                 commitBuy();
             } else if (CLAIM_EMERALDS_PATTERN.matcher(msg).find()) {
-                tmLog("[TM] >>> SELL confirmation detected");
+                tmLog(">>> SELL confirmation detected");
                 logApiSnapshot("sell-confirm");
                 commitSell();
             }
         } catch (Exception e) {
-            tmWarn("[TM] Error processing trade message", e);
+            tmWarn("Error processing trade message", e);
         }
     }
 
@@ -363,7 +363,7 @@ public class TradeMarketLogger {
                     .append(": ").append(e.getMessage()).append("]");
         }
 
-        tmLog("[TM]   slot[{}]: name=\"{}\" wynnType={}{}{}{}", slot, hoverName,
+        tmLog("  slot[{}]: name=\"{}\" wynnType={}{}{}{}", slot, hoverName,
                 wynnType, wynnDetail, priceStr,
                 lore.length() > 0 ? "\n            lore:" + lore : "");
     }
@@ -372,16 +372,16 @@ public class TradeMarketLogger {
         try {
             Container container = Models.Container.getCurrentContainer();
             if (container != null) {
-                tmLog("[TM] Container [{}]: class={}, name=\"{}\", id={}",
+                tmLog("Container [{}]: class={}, name=\"{}\", id={}",
                         trigger,
                         container.getClass().getSimpleName(),
                         container.getContainerName(),
                         container.getContainerId());
             } else {
-                tmLog("[TM] Container [{}]: null", trigger);
+                tmLog("Container [{}]: null", trigger);
             }
         } catch (Exception e) {
-            tmLog("[TM] Container [{}]: error reading - {}", trigger, e.getMessage());
+            tmLog("Container [{}]: error reading - {}", trigger, e.getMessage());
         }
     }
 
@@ -391,42 +391,42 @@ public class TradeMarketLogger {
             boolean inTM = Models.TradeMarket.inTradeMarket();
             boolean inChat = Models.TradeMarket.inChatInput();
 
-            tmLog("[TM] API [{}]: state={}, inTradeMarket={}, inChatInput={}",
+            tmLog("API [{}]: state={}, inTradeMarket={}, inChatInput={}",
                     trigger, state, inTM, inChat);
 
             try {
                 int unitPrice = Models.TradeMarket.getUnitPrice();
-                tmLog("[TM] API [{}]: unitPrice={}", trigger, unitPrice);
+                tmLog("API [{}]: unitPrice={}", trigger, unitPrice);
             } catch (Exception e) {
-                tmLog("[TM] API [{}]: unitPrice=error({})", trigger, e.getMessage());
+                tmLog("API [{}]: unitPrice=error({})", trigger, e.getMessage());
             }
 
             try {
                 String soldName = Models.TradeMarket.getSoldItemName();
-                tmLog("[TM] API [{}]: soldItemName=\"{}\"", trigger, soldName);
+                tmLog("API [{}]: soldItemName=\"{}\"", trigger, soldName);
             } catch (Exception e) {
-                tmLog("[TM] API [{}]: soldItemName=error({})", trigger, e.getMessage());
+                tmLog("API [{}]: soldItemName=error({})", trigger, e.getMessage());
             }
 
             try {
                 var pci = Models.TradeMarket.getPriceCheckInfo();
                 if (pci != null) {
-                    tmLog("[TM] API [{}]: priceCheck: recommended={}, bid={}, ask={}",
+                    tmLog("API [{}]: priceCheck: recommended={}, bid={}, ask={}",
                             trigger, pci.recommendedPrice(), pci.bid(), pci.ask());
                 }
             } catch (Exception e) {
-                tmLog("[TM] API [{}]: priceCheck=error({})", trigger, e.getMessage());
+                tmLog("API [{}]: priceCheck=error({})", trigger, e.getMessage());
             }
 
             try {
                 String filter = Models.TradeMarket.getLastSearchFilter();
                 if (filter != null && !filter.isEmpty()) {
-                    tmLog("[TM] API [{}]: lastSearchFilter=\"{}\"", trigger, filter);
+                    tmLog("API [{}]: lastSearchFilter=\"{}\"", trigger, filter);
                 }
             } catch (Exception ignored) {}
 
         } catch (Exception e) {
-            tmWarn("[TM] API snapshot failed [{}]", trigger, e);
+            tmWarn("API snapshot failed [{}]", trigger, e);
         }
     }
 
@@ -462,7 +462,7 @@ public class TradeMarketLogger {
                         TradeMarketPriceInfo priceInfo = Models.TradeMarket.calculateItemPriceInfo(stack);
                         if (priceInfo != null && priceInfo != TradeMarketPriceInfo.EMPTY && priceInfo.totalPrice() > 0) {
                             foundPrice = priceInfo.totalPrice();
-                            tmLog("[TM] Price from Wynntils API (slot {}): {}", i, foundPrice);
+                            tmLog("Price from Wynntils API (slot {}): {}", i, foundPrice);
                         }
                     } catch (Exception ignored) {}
                 }
@@ -471,7 +471,7 @@ public class TradeMarketLogger {
                 if (foundPrice < 0) {
                     foundPrice = extractPriceFromStack(stack);
                     if (foundPrice > 0) {
-                        tmLog("[TM] Price from lore parsing (slot {}): {}", i, foundPrice);
+                        tmLog("Price from lore parsing (slot {}): {}", i, foundPrice);
                     }
                 }
             }
@@ -483,13 +483,13 @@ public class TradeMarketLogger {
                 if (foundPrice > 0) {
                     pendingPrice = foundPrice;
                 }
-                tmLog("[TM] Pending buy captured: item=\"{}\", base=\"{}\", fingerprint={}, price={}",
+                tmLog("Pending buy captured: item=\"{}\", base=\"{}\", fingerprint={}, price={}",
                         pendingItemName, pendingBaseName,
                         foundFingerprint != null ? "yes(" + foundFingerprint.length() + "chars)" : "null",
                         pendingPrice);
             }
         } catch (Exception e) {
-            tmWarn("[TM] Error capturing buy context", e);
+            tmWarn("Error capturing buy context", e);
         }
     }
 
@@ -521,7 +521,7 @@ public class TradeMarketLogger {
                         TradeMarketPriceInfo priceInfo = Models.TradeMarket.calculateItemPriceInfo(stack);
                         if (priceInfo != null && priceInfo != TradeMarketPriceInfo.EMPTY && priceInfo.totalPrice() > 0) {
                             foundPrice = priceInfo.totalPrice();
-                            tmLog("[TM] Sell price from Wynntils API (slot {}): {}", i, foundPrice);
+                            tmLog("Sell price from Wynntils API (slot {}): {}", i, foundPrice);
                         }
                     } catch (Exception ignored) {}
                 }
@@ -530,7 +530,7 @@ public class TradeMarketLogger {
                 if (foundPrice < 0) {
                     foundPrice = extractPriceFromStack(stack);
                     if (foundPrice > 0) {
-                        tmLog("[TM] Sell price from lore parsing (slot {}): {}", i, foundPrice);
+                        tmLog("Sell price from lore parsing (slot {}): {}", i, foundPrice);
                     }
                 }
             }
@@ -549,19 +549,19 @@ public class TradeMarketLogger {
                 TransactionRecord match = TransactionStore.findMatchingBuy(foundBase, foundFingerprint);
                 matchedBuyRecord = match;
                 if (match != null) {
-                    tmLog("[TM] Sell overlay: matched buy for \"{}\" at price {}",
+                    tmLog("Sell overlay: matched buy for \"{}\" at price {}",
                             match.itemName, match.priceEmeralds);
                 } else {
-                    tmLog("[TM] Sell overlay: no matching buy found for \"{}\"", foundBase);
+                    tmLog("Sell overlay: no matching buy found for \"{}\"", foundBase);
                 }
             }
 
-            tmLog("[TM] Pending sell captured: item=\"{}\", base=\"{}\", fingerprint={}, price={}",
+            tmLog("Pending sell captured: item=\"{}\", base=\"{}\", fingerprint={}, price={}",
                     pendingSellItemName, foundBase,
                     foundFingerprint != null ? "yes(" + foundFingerprint.length() + "chars)" : "null",
                     pendingSellPrice);
         } catch (Exception e) {
-            tmWarn("[TM] Error capturing sell context", e);
+            tmWarn("Error capturing sell context", e);
         }
     }
 
@@ -583,11 +583,11 @@ public class TradeMarketLogger {
                     .filter(s -> {
                         String api = s.statType().getApiName();
                         if (api == null || api.isEmpty()) {
-                            tmWarn("[TM] Skipping stat with null/empty apiName in fingerprint");
+                            tmWarn("Skipping stat with null/empty apiName in fingerprint");
                             return false;
                         }
                         if (api.contains(":") || api.contains(",")) {
-                            tmWarn("[TM] Skipping stat with delimiter in apiName: \"{}\"", api);
+                            tmWarn("Skipping stat with delimiter in apiName: \"{}\"", api);
                             return false;
                         }
                         return true;
@@ -596,7 +596,7 @@ public class TradeMarketLogger {
                     .map(s -> s.statType().getApiName() + ":" + s.value() + ":" + s.stars())
                     .collect(Collectors.joining(","));
         } catch (Exception e) {
-            tmLog("[TM] Fingerprint build error: {}", e.getMessage());
+            tmLog("Fingerprint build error: {}", e.getMessage());
         }
         return null;
     }
@@ -635,7 +635,7 @@ public class TradeMarketLogger {
                 if (denomTotal > 0) return denomTotal;
             }
         } catch (Exception e) {
-            tmLog("[TM] Lore price extraction error: {}", e.getMessage());
+            tmLog("Lore price extraction error: {}", e.getMessage());
         }
         return -1;
     }
@@ -673,7 +673,7 @@ public class TradeMarketLogger {
 
         long price = pendingPrice > 0 ? pendingPrice : 0;
 
-        tmLog("[TM] Committing BUY: item=\"{}\", base=\"{}\", fingerprint={}, price={}",
+        tmLog("Committing BUY: item=\"{}\", base=\"{}\", fingerprint={}, price={}",
                 name, pendingBaseName,
                 pendingFingerprint != null ? "yes" : "null", price);
 
@@ -732,14 +732,14 @@ public class TradeMarketLogger {
             if (match) {
                 price = pendingSellPrice;
             } else {
-                tmWarn("[TM] Sell name mismatch: chat=\"{}\", pending=\"{}\", base=\"{}\". Using price anyway.",
+                tmWarn("Sell name mismatch: chat=\"{}\", pending=\"{}\", base=\"{}\". Using price anyway.",
                         name, pendingSellItemName, pendingSellBaseName);
                 // Still use the price — sell flow is linear, stale data is unlikely
                 price = pendingSellPrice;
             }
         }
 
-        tmLog("[TM] Committing SELL: item=\"{}\", base=\"{}\", price={}", name, baseName, price);
+        tmLog("Committing SELL: item=\"{}\", base=\"{}\", price={}", name, baseName, price);
 
         TransactionStore.addTransaction(new TransactionRecord(
                 name, price, TransactionRecord.Type.SELL, "", 1,

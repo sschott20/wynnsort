@@ -1,5 +1,7 @@
 package com.wynnsort;
 
+import com.wynnsort.util.DiagnosticLog;
+import com.wynnsort.util.FeatureLogger;
 import com.wynntils.screens.base.widgets.ItemSearchWidget;
 import com.wynntils.screens.trademarket.TradeMarketSearchResultScreen;
 import net.minecraft.client.gui.screens.Screen;
@@ -14,6 +16,7 @@ import java.util.regex.Pattern;
  */
 public final class TradeMarketSortHelper {
 
+    private static final FeatureLogger LOG = new FeatureLogger("Sort", DiagnosticLog.Category.TRADE_MARKET);
     private static final Pattern SORT_PATTERN = Pattern.compile("\\bsort:\\S+");
 
     private static Field itemSearchWidgetField;
@@ -31,7 +34,7 @@ public final class TradeMarketSortHelper {
         }
 
         if (itemSearchWidgetField == null) {
-            WynnSortMod.logWarn("itemSearchWidget field was not resolved; cannot toggle sort");
+            LOG.warn("itemSearchWidget field was not resolved; cannot toggle sort");
             return;
         }
 
@@ -41,21 +44,23 @@ public final class TradeMarketSortHelper {
                 return;
             }
 
+            LOG.info("Toggle sort on screenClass={}, widgetClass={}", tradeScreen.getClass().getName(), searchWidget.getClass().getName());
+
             String currentText = searchWidget.getTextBoxInput();
             Matcher m = SORT_PATTERN.matcher(currentText);
 
             if (m.find()) {
                 String newText = m.replaceAll("").trim();
                 searchWidget.setTextBoxInput(newText);
-                WynnSortMod.log("Quality sort disabled");
+                LOG.info("Quality sort disabled");
             } else {
                 String token = SortState.getSortToken();
                 String newText = currentText.isEmpty() ? token : currentText + " " + token;
                 searchWidget.setTextBoxInput(newText);
-                WynnSortMod.log("Quality sort enabled: {}", token);
+                LOG.info("Quality sort enabled: {}", token);
             }
         } catch (IllegalAccessException e) {
-            WynnSortMod.logError("Failed to access itemSearchWidget", e);
+            LOG.error("Failed to access itemSearchWidget", e);
         }
     }
 
@@ -73,7 +78,7 @@ public final class TradeMarketSortHelper {
         }
 
         if (itemSearchWidgetField == null) {
-            WynnSortMod.logWarn("itemSearchWidget field was not resolved; cannot inject sort token");
+            LOG.warn("itemSearchWidget field was not resolved; cannot inject sort token");
             return;
         }
 
@@ -81,15 +86,17 @@ public final class TradeMarketSortHelper {
             ItemSearchWidget searchWidget = (ItemSearchWidget) itemSearchWidgetField.get(tradeScreen);
             if (searchWidget == null) return;
 
+            LOG.info("Inject sort token on screenClass={}, widgetClass={}, token='{}'", tradeScreen.getClass().getName(), searchWidget.getClass().getName(), sortToken);
+
             String currentText = searchWidget.getTextBoxInput();
             Matcher m = SORT_PATTERN.matcher(currentText);
             String cleaned = m.replaceAll("").trim();
 
             String newText = cleaned.isEmpty() ? sortToken : cleaned + " " + sortToken;
             searchWidget.setTextBoxInput(newText);
-            WynnSortMod.log("Injected sort token from preset: {}", sortToken);
+            LOG.info("Injected sort token from preset: {}", sortToken);
         } catch (IllegalAccessException e) {
-            WynnSortMod.logError("Failed to inject sort token", e);
+            LOG.error("Failed to inject sort token", e);
         }
     }
 
@@ -99,7 +106,7 @@ public final class TradeMarketSortHelper {
             itemSearchWidgetField = TradeMarketSearchResultScreen.class.getDeclaredField("itemSearchWidget");
             itemSearchWidgetField.setAccessible(true);
         } catch (NoSuchFieldException e) {
-            WynnSortMod.logError("Failed to find itemSearchWidget field", e);
+            LOG.error("Failed to find itemSearchWidget field", e);
         }
     }
 }

@@ -2,6 +2,7 @@ package com.wynnsort.feature;
 
 import com.wynnsort.WynnSortMod;
 import com.wynnsort.config.WynnSortConfig;
+import com.wynnsort.util.FeatureLogger;
 import com.wynnsort.market.CrowdsourceClient;
 import com.wynnsort.market.MarketPriceEntry;
 import com.wynnsort.market.MarketPriceStore;
@@ -27,6 +28,7 @@ import java.util.Optional;
 public class MarketPriceFeature {
 
     public static final MarketPriceFeature INSTANCE = new MarketPriceFeature();
+    private static final FeatureLogger LOG = new FeatureLogger("Price", DiagnosticLog.Category.MARKET_PRICE);
 
     private MarketPriceFeature() {}
 
@@ -38,7 +40,7 @@ public class MarketPriceFeature {
         try {
             state = Models.TradeMarket.getTradeMarketState();
         } catch (Exception e) {
-            WynnSortMod.log("[WynnSort] MarketPrice: failed to get trade market state", e);
+            LOG.info("failed to get trade market state", e);
             return;
         }
 
@@ -50,7 +52,7 @@ public class MarketPriceFeature {
         List<ItemStack> items = event.getItems();
         if (items == null) return;
 
-        WynnSortMod.log("[WynnSort] MarketPrice: processing {} items in state {}", items.size(), state);
+        LOG.info("processing {} items in state {}", items.size(), state);
 
         long now = System.currentTimeMillis();
         int recorded = 0;
@@ -58,20 +60,22 @@ public class MarketPriceFeature {
             if (stack == null || stack.isEmpty()) continue;
 
             try {
-                // Debug: log the WynnItem type before extracting base name
+                // Exploratory: log WynnItem class names for discovering interfaces
                 Optional<WynnItem> wynnOpt = Models.Item.getWynnItem(stack);
                 String wynnType = wynnOpt.map(w -> w.getClass().getSimpleName()).orElse("none");
+                String wynnFullClass = wynnOpt.map(w -> w.getClass().getName()).orElse("none");
                 String hoverName = stack.getHoverName().getString();
+                LOG.info("Item: hover='{}', wynnType={}, fullClass={}", hoverName, wynnType, wynnFullClass);
 
                 String baseName = ItemNameHelper.extractBaseName(stack);
                 if (baseName == null) {
-                    WynnSortMod.log("[WynnSort] MarketPrice: null baseName for '{}' (WynnItem={})", hoverName, wynnType);
+                    LOG.info("null baseName for '{}' (WynnItem={})", hoverName, wynnType);
                     continue;
                 }
 
                 TradeMarketPriceInfo priceInfo = Models.TradeMarket.calculateItemPriceInfo(stack);
                 if (priceInfo == null || priceInfo == TradeMarketPriceInfo.EMPTY || priceInfo.price() <= 0) {
-                    WynnSortMod.log("[WynnSort] MarketPrice: no price for '{}' (priceInfo={})", baseName,
+                    LOG.info("no price for '{}' (priceInfo={})", baseName,
                             priceInfo == null ? "null" : priceInfo == TradeMarketPriceInfo.EMPTY ? "EMPTY" : "price=" + priceInfo.price());
                     continue;
                 }
@@ -79,14 +83,14 @@ public class MarketPriceFeature {
                 MarketPriceStore.record(baseName, priceInfo.price(), now);
                 PriceHistoryStore.record(baseName, priceInfo.price(), now);
                 recorded++;
-                WynnSortMod.log("[WynnSort] MarketPrice: recorded {}={} emeralds", baseName, priceInfo.price());
+                LOG.info("recorded {}={} emeralds", baseName, priceInfo.price());
                 DiagnosticLog.event(DiagnosticLog.Category.TRADE_MARKET, "price_recorded",
                         Map.of("item", baseName, "price", priceInfo.price()));
             } catch (Exception e) {
-                WynnSortMod.logWarn("[WynnSort] MarketPrice: exception processing item '{}'", stack.getHoverName().getString(), e);
+                LOG.warn("exception processing item '{}'", stack.getHoverName().getString(), e);
             }
         }
-        WynnSortMod.log("[WynnSort] MarketPrice: recorded {}/{} items", recorded, items.size());
+        LOG.info("recorded {}/{} items", recorded, items.size());
     }
 
     @SubscribeEvent
@@ -165,7 +169,7 @@ public class MarketPriceFeature {
                     linesAdded++;
                 }
             } catch (Exception e) {
-                // Silently ignore crowdsource tooltip errors
+                LOG.warn("Crowdsource tooltip error: {}", e.getMessage());
             }
         }
     }

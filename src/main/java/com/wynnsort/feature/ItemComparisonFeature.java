@@ -2,6 +2,8 @@ package com.wynnsort.feature;
 
 import com.wynnsort.WynnSortMod;
 import com.wynnsort.config.WynnSortConfig;
+import com.wynnsort.util.DiagnosticLog;
+import com.wynnsort.util.FeatureLogger;
 import com.wynntils.core.components.Models;
 import com.wynntils.mc.event.ItemTooltipRenderEvent;
 import com.wynntils.models.gear.type.GearInfo;
@@ -28,78 +30,107 @@ public class ItemComparisonFeature {
 
     public static final ItemComparisonFeature INSTANCE = new ItemComparisonFeature();
 
+    private static final FeatureLogger LOG = new FeatureLogger("Compare", DiagnosticLog.Category.COMPARISON);
+    private boolean firstComparisonLogged = false;
+
     private ItemComparisonFeature() {}
 
     @SubscribeEvent
     public void onItemTooltipRender(ItemTooltipRenderEvent.Pre event) {
-        if (!WynnSortConfig.INSTANCE.itemComparisonEnabled) {
-            return;
-        }
+        try {
+            if (!WynnSortConfig.INSTANCE.itemComparisonEnabled) {
+                return;
+            }
 
-        ItemStack itemStack = event.getItemStack();
-        if (itemStack.isEmpty()) {
-            return;
-        }
+            ItemStack itemStack = event.getItemStack();
+            if (itemStack.isEmpty()) {
+                return;
+            }
 
-        // Resolve the hovered item as a GearItem
-        Optional<WynnItem> wynnItemOpt = Models.Item.getWynnItem(itemStack);
-        if (wynnItemOpt.isEmpty()) {
-            return;
-        }
-        if (!(wynnItemOpt.get() instanceof GearItem hoveredGearItem)) {
-            return;
-        }
+            // Resolve the hovered item as a GearItem
+            Optional<WynnItem> wynnItemOpt = Models.Item.getWynnItem(itemStack);
+            if (wynnItemOpt.isEmpty()) {
+                return;
+            }
+            if (!(wynnItemOpt.get() instanceof GearItem hoveredGearItem)) {
+                return;
+            }
 
-        Optional<GearInstance> hoveredInstanceOpt = hoveredGearItem.getItemInstance();
-        if (hoveredInstanceOpt.isEmpty()) {
-            return;
-        }
+            Optional<GearInstance> hoveredInstanceOpt = hoveredGearItem.getItemInstance();
+            if (hoveredInstanceOpt.isEmpty()) {
+                return;
+            }
 
-        List<Component> tooltips = event.getTooltips();
+            List<Component> tooltips = event.getTooltips();
 
-        // Always show the hint line at the end
-        if (!Screen.hasShiftDown()) {
-            tooltips.add(Component.literal("\u00A78[Hold Shift to compare]"));
-            return;
-        }
+            // Always show the hint line at the end
+            if (!Screen.hasShiftDown()) {
+                tooltips.add(Component.literal("\u00A78[Hold Shift to compare]"));
+                return;
+            }
 
-        GearInstance hoveredInstance = hoveredInstanceOpt.get();
-        GearInfo hoveredInfo = hoveredGearItem.getItemInfo();
-        GearType gearType = hoveredInfo.type();
+            GearInstance hoveredInstance = hoveredInstanceOpt.get();
+            GearInfo hoveredInfo = hoveredGearItem.getItemInfo();
+            GearType gearType = hoveredInfo.type();
 
-        // Find the equipped item of the same gear type
-        ItemStack equippedStack = findEquippedItem(gearType);
-        if (equippedStack == null || equippedStack.isEmpty()) {
+            // Find the equipped item of the same gear type
+            ItemStack equippedStack = findEquippedItem(gearType);
+            if (equippedStack == null || equippedStack.isEmpty()) {
+                LOG.info("No equipped item found for gearType={}", gearType.name());
+                tooltips.add(Component.literal("\u00A76--- vs Equipped ---"));
+                tooltips.add(Component.literal("\u00A77No equipped item of this type"));
+                return;
+            }
+
+            // Resolve the equipped item as a GearItem
+            Optional<WynnItem> equippedWynnOpt = Models.Item.getWynnItem(equippedStack);
+            if (equippedWynnOpt.isEmpty() || !(equippedWynnOpt.get() instanceof GearItem equippedGearItem)) {
+                String equippedWynnClass = equippedWynnOpt.isPresent()
+                        ? equippedWynnOpt.get().getClass().getSimpleName() : "empty";
+                LOG.info("Equipped item is not identifiable gear: wynnItemType={}, gearType={}",
+                        equippedWynnClass, gearType.name());
+                tooltips.add(Component.literal("\u00A76--- vs Equipped ---"));
+                tooltips.add(Component.literal("\u00A77Equipped item is not identifiable gear"));
+                return;
+            }
+
+            Optional<GearInstance> equippedInstanceOpt = equippedGearItem.getItemInstance();
+            if (equippedInstanceOpt.isEmpty()) {
+                tooltips.add(Component.literal("\u00A76--- vs Equipped ---"));
+                tooltips.add(Component.literal("\u00A77Equipped item is unidentified"));
+                return;
+            }
+
+            GearInstance equippedInstance = equippedInstanceOpt.get();
+
+            // Build comparison lines
             tooltips.add(Component.literal("\u00A76--- vs Equipped ---"));
-            tooltips.add(Component.literal("\u00A77No equipped item of this type"));
-            return;
+
+            // Overall percentage comparison
+            addOverallComparison(tooltips, hoveredInstance, equippedInstance);
+
+            // Per-stat comparison
+            addStatComparisons(tooltips, hoveredInstance, equippedInstance);
+
+            // Log first successful comparison per session (exploratory)
+            if (!firstComparisonLogged) {
+                firstComparisonLogged = true;
+                String itemName = hoveredInfo.name();
+                float hoveredPct = hoveredInstance.hasOverallValue() ? hoveredInstance.getOverallPercentage() : -1f;
+                String equippedName = equippedGearItem.getItemInfo().name();
+                float equippedPct = equippedInstance.hasOverallValue() ? equippedInstance.getOverallPercentage() : -1f;
+                LOG.info("First comparison: item='{}', gearType={}, overall={}%, equippedItem='{}', equippedOverall={}%, wynnItemClass={}",
+                        itemName, gearType.name(), Math.round(hoveredPct),
+                        equippedName, Math.round(equippedPct),
+                        wynnItemOpt.get().getClass().getSimpleName());
+                LOG.event("first_comparison", Map.of(
+                        "item", itemName, "gearType", gearType.name(),
+                        "hoveredPct", Math.round(hoveredPct),
+                        "equippedItem", equippedName, "equippedPct", Math.round(equippedPct)));
+            }
+        } catch (Exception e) {
+            LOG.error("Error in item comparison tooltip render", e);
         }
-
-        // Resolve the equipped item as a GearItem
-        Optional<WynnItem> equippedWynnOpt = Models.Item.getWynnItem(equippedStack);
-        if (equippedWynnOpt.isEmpty() || !(equippedWynnOpt.get() instanceof GearItem equippedGearItem)) {
-            tooltips.add(Component.literal("\u00A76--- vs Equipped ---"));
-            tooltips.add(Component.literal("\u00A77Equipped item is not identifiable gear"));
-            return;
-        }
-
-        Optional<GearInstance> equippedInstanceOpt = equippedGearItem.getItemInstance();
-        if (equippedInstanceOpt.isEmpty()) {
-            tooltips.add(Component.literal("\u00A76--- vs Equipped ---"));
-            tooltips.add(Component.literal("\u00A77Equipped item is unidentified"));
-            return;
-        }
-
-        GearInstance equippedInstance = equippedInstanceOpt.get();
-
-        // Build comparison lines
-        tooltips.add(Component.literal("\u00A76--- vs Equipped ---"));
-
-        // Overall percentage comparison
-        addOverallComparison(tooltips, hoveredInstance, equippedInstance);
-
-        // Per-stat comparison
-        addStatComparisons(tooltips, hoveredInstance, equippedInstance);
     }
 
     /**

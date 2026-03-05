@@ -2,6 +2,8 @@ package com.wynnsort.feature;
 
 import com.wynnsort.WynnSortMod;
 import com.wynnsort.config.WynnSortConfig;
+import com.wynnsort.util.DiagnosticLog;
+import com.wynnsort.util.FeatureLogger;
 import com.wynntils.core.components.Models;
 import com.wynntils.models.lootrun.beacons.LootrunBeaconKind;
 import com.wynntils.models.lootrun.event.LootrunFinishedEvent;
@@ -12,6 +14,9 @@ import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.neoforged.bus.api.SubscribeEvent;
+
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /**
  * Tracks per-session lootrun statistics and renders a compact HUD panel
@@ -26,6 +31,7 @@ import net.neoforged.bus.api.SubscribeEvent;
 public class LootrunSessionStats implements HudRenderCallback {
 
     public static final LootrunSessionStats INSTANCE = new LootrunSessionStats();
+    private static final FeatureLogger LOG = new FeatureLogger("LRStats", DiagnosticLog.Category.LOOTRUN);
 
     // ── Colors ────────────────────────────────────────────────────────────
     private static final int COLOR_HEADER = 0xFFFF8800;    // orange header
@@ -69,7 +75,7 @@ public class LootrunSessionStats implements HudRenderCallback {
     @SubscribeEvent
     public void onLootrunCompleted(LootrunFinishedEvent.Completed event) {
         try {
-            WynnSortMod.log("[WynnSort] LootrunFinishedEvent.Completed: challenges={}, time={}, pulls={}, rerolls={}, sacrifices={}, mobs={}, chests={}, xp={}",
+            LOG.info("LootrunFinishedEvent.Completed: challenges={}, time={}, pulls={}, rerolls={}, sacrifices={}, mobs={}, chests={}, xp={}",
                     event.getChallengesCompleted(), event.getTimeElapsed(),
                     event.getRewardPulls(), event.getRewardRerolls(), event.getRewardSacrifices(),
                     event.getMobsKilled(), event.getChestsOpened(), event.getExperienceGained());
@@ -89,10 +95,17 @@ public class LootrunSessionStats implements HudRenderCallback {
                 lastSessionEndTime = System.currentTimeMillis();
                 currentSession = null;
 
-                WynnSortMod.log("[WynnSort] Lootrun session completed! Beacons: {}", lastSession.getBeaconSummary());
+                LOG.info("Lootrun session completed! Beacons: {}", lastSession.getBeaconSummary());
+                Map<String, Object> evtData = new LinkedHashMap<>();
+                evtData.put("challenges", lastSession.challengesCompleted);
+                evtData.put("pulls", lastSession.pullsEarned);
+                evtData.put("rerolls", lastSession.rerollsEarned);
+                evtData.put("sacrifices", lastSession.sacrifices);
+                evtData.put("beacons", lastSession.getBeaconSummary());
+                LOG.event("session_completed", evtData);
             }
         } catch (Exception e) {
-            WynnSortMod.logError("[WynnSort] Error handling LootrunFinishedEvent.Completed", e);
+            LOG.error("Error handling LootrunFinishedEvent.Completed", e);
         }
     }
 
@@ -102,7 +115,7 @@ public class LootrunSessionStats implements HudRenderCallback {
     @SubscribeEvent
     public void onLootrunFailed(LootrunFinishedEvent.Failed event) {
         try {
-            WynnSortMod.log("[WynnSort] LootrunFinishedEvent.Failed: challenges={}, time={}",
+            LOG.info("LootrunFinishedEvent.Failed: challenges={}, time={}",
                     event.getChallengesCompleted(), event.getTimeElapsed());
 
             if (currentSession != null) {
@@ -114,10 +127,14 @@ public class LootrunSessionStats implements HudRenderCallback {
                 lastSessionEndTime = System.currentTimeMillis();
                 currentSession = null;
 
-                WynnSortMod.log("[WynnSort] Lootrun session failed. Beacons: {}", lastSession.getBeaconSummary());
+                LOG.info("Lootrun session failed. Beacons: {}", lastSession.getBeaconSummary());
+                Map<String, Object> evtData = new LinkedHashMap<>();
+                evtData.put("challenges", lastSession.challengesCompleted);
+                evtData.put("beacons", lastSession.getBeaconSummary());
+                LOG.event("session_failed", evtData);
             }
         } catch (Exception e) {
-            WynnSortMod.logError("[WynnSort] Error handling LootrunFinishedEvent.Failed", e);
+            LOG.error("Error handling LootrunFinishedEvent.Failed", e);
         }
     }
 
@@ -134,33 +151,38 @@ public class LootrunSessionStats implements HudRenderCallback {
         try {
             currentState = Models.Lootrun.getState();
         } catch (Exception e) {
+            LOG.warn("Models.Lootrun.getState() failed: {}", e.getMessage());
             return;
         }
 
-        // Periodic logging
+        // Periodic logging + exploratory: raw Lootrun state
         logTick++;
         if (logTick >= 200) {
             logTick = 0;
+            LOG.info("SessionStats tick: rawState={} (enum={}), lastState={}",
+                    currentState, currentState.name(), lastState);
             if (currentSession != null) {
-                WynnSortMod.log("[WynnSort] SessionStats tick: state={}, challenges={}, beacons={}, duration={}",
-                        currentState, currentSession.challengesCompleted,
+                LOG.info("  session: challenges={}, beacons={}, duration={}",
+                        currentSession.challengesCompleted,
                         currentSession.getBeaconSummary(), currentSession.getFormattedDuration());
             }
         }
 
         // Detect lootrun start
         if (currentState.isRunning() && !lastState.isRunning()) {
-            WynnSortMod.log("[WynnSort] Lootrun started! Creating new session.");
+            LOG.info("Lootrun started! Creating new session. State transition: {} -> {} (raw enum: {})",
+                    lastState, currentState, currentState.name());
             currentSession = new LootrunSessionData();
             lastChallengesCurrent = 0;
             lastRerolls = 0;
             lastSacrifices = 0;
+            LOG.event("session_started", Map.of("state", currentState.name()));
         }
 
         // Detect lootrun end (backup in case events don't fire)
         if (!currentState.isRunning() && lastState.isRunning()) {
             if (currentSession != null) {
-                WynnSortMod.log("[WynnSort] Lootrun ended via state poll (events may have already handled this).");
+                LOG.info("Lootrun ended via state poll (events may have already handled this).");
                 if (currentSession.endTime == 0) {
                     currentSession.endTime = System.currentTimeMillis();
                     lastSession = currentSession;
@@ -202,13 +224,13 @@ public class LootrunSessionStats implements HudRenderCallback {
                 if (currentChallenges > lastChallengesCurrent) {
                     int delta = currentChallenges - lastChallengesCurrent;
                     currentSession.challengesCompleted = currentChallenges;
-                    WynnSortMod.log("[WynnSort] Challenges updated: {} -> {} (+{})",
+                    LOG.info("Challenges updated: {} -> {} (+{})",
                             lastChallengesCurrent, currentChallenges, delta);
                 }
                 lastChallengesCurrent = currentChallenges;
             }
         } catch (Exception e) {
-            // Silently ignore - API may not be ready
+            LOG.warn("API poll failed (challenges): {}", e.getMessage());
         }
 
         try {
@@ -216,11 +238,11 @@ public class LootrunSessionStats implements HudRenderCallback {
             int rerolls = Models.Lootrun.getRerolls();
             if (rerolls > lastRerolls) {
                 currentSession.rerollsEarned = rerolls;
-                WynnSortMod.log("[WynnSort] Rerolls updated: {} -> {}", lastRerolls, rerolls);
+                LOG.info("Rerolls updated: {} -> {}", lastRerolls, rerolls);
             }
             lastRerolls = rerolls;
         } catch (Exception e) {
-            // Silently ignore
+            LOG.warn("API poll failed (rerolls): {}", e.getMessage());
         }
 
         try {
@@ -228,11 +250,11 @@ public class LootrunSessionStats implements HudRenderCallback {
             int sacrifices = Models.Lootrun.getSacrifices();
             if (sacrifices > lastSacrifices) {
                 currentSession.sacrifices = sacrifices;
-                WynnSortMod.log("[WynnSort] Sacrifices updated: {} -> {}", lastSacrifices, sacrifices);
+                LOG.info("Sacrifices updated: {} -> {}", lastSacrifices, sacrifices);
             }
             lastSacrifices = sacrifices;
         } catch (Exception e) {
-            // Silently ignore
+            LOG.warn("API poll failed (sacrifices): {}", e.getMessage());
         }
 
         // Detect beacon selections via state transitions (CHOOSING_BEACON -> IN_TASK)
@@ -243,17 +265,17 @@ public class LootrunSessionStats implements HudRenderCallback {
                 try {
                     vibrant = Models.Lootrun.wasLastBeaconVibrant();
                 } catch (Exception e) {
-                    // Method may not exist in all versions
+                    LOG.warn("wasLastBeaconVibrant() not available: {}", e.getMessage());
                 }
 
                 String colorName = lastBeacon != null ? lastBeacon.name() : "UNKNOWN";
                 currentSession.recordBeacon(colorName, vibrant);
-                WynnSortMod.log("[WynnSort] Beacon selected: {} (vibrant={}), total beacons: {}",
+                LOG.info("Beacon selected: {} (vibrant={}), total beacons: {}",
                         colorName, vibrant, currentSession.beaconsSelected);
             } catch (Exception e) {
                 // If we can't determine the beacon color, record as unknown
                 currentSession.recordBeacon("UNKNOWN", false);
-                WynnSortMod.logWarn("[WynnSort] Failed to get beacon color on selection", e);
+                LOG.warn("Failed to get beacon color on selection", e);
             }
         }
     }
