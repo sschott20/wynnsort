@@ -25,11 +25,6 @@ Adds a "Sort/Sorting" toggle button to the trade market search results screen. W
 
 On any container screen, a stat filter text box appears to the right. Type a stat name (e.g. `walkSpeed`), a comparison (`walkSpeed > 50`), or comma-separated filters. Per-stat weight boxes auto-appear for stats found in the container. Up to 5 named presets can be saved (left-click empty slot to name, left-click filled slot to apply, right-click to overwrite). Press P to cycle through presets.
 
-## Auto-Sort Cheapest
-**Config:** Auto-Sort Cheapest
-
-Automatically sorts trade market results by lowest price.
-
 ## Scale Mode
 **Config:** Weighted Scale (Nori/Wynnpool)
 
