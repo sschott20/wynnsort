@@ -134,6 +134,15 @@ public class MarketPriceFeature {
             tooltips.add(insertIndex + linesAdded, Component.literal(mainLine.toString()));
             linesAdded++;
 
+            // Add buyer cost with tax
+            int taxPercent = WynnSortConfig.INSTANCE.tradeMarketBuyTaxPercent;
+            if (taxPercent > 0) {
+                long buyerCost = entry.price + (entry.price * taxPercent / 100);
+                String taxLine = "\u00A77w/ " + taxPercent + "% tax: \u00A7e" + formatEmeralds(buyerCost);
+                tooltips.add(insertIndex + linesAdded, Component.literal(taxLine));
+                linesAdded++;
+            }
+
             // Add range line if we have history data
             if (stats != null && stats.count() > 1) {
                 String minStr = formatEmeralds(stats.min());

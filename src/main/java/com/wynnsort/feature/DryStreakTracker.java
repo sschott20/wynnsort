@@ -55,11 +55,11 @@ public class DryStreakTracker implements HudRenderCallback {
     private static final Path DATA_PATH =
             FabricLoader.getInstance().getConfigDir().resolve("wynnsort/dry_streak.json");
 
-    // HUD color thresholds
-    private static final int COLOR_WHITE  = 0xFFFFFFFF;  // < 500 pulls
-    private static final int COLOR_YELLOW = 0xFFFFFF55;  // 500-999 pulls
-    private static final int COLOR_ORANGE = 0xFFFFAA00;  // 1000-1999 pulls
-    private static final int COLOR_RED    = 0xFFFF5555;  // >= 2000 pulls
+    // HUD color thresholds (based on ~1/2500 mythic rate)
+    private static final int COLOR_WHITE  = 0xFFFFFFFF;  // < 1250 pulls (under half expected)
+    private static final int COLOR_YELLOW = 0xFFFFFF55;  // 1250-2499 pulls (approaching expected)
+    private static final int COLOR_ORANGE = 0xFFFFAA00;  // 2500-4999 pulls (past expected rate)
+    private static final int COLOR_RED    = 0xFFFF5555;  // >= 5000 pulls (2x expected rate)
     private static final int COLOR_LABEL  = 0xFFAAAAAA;
     private static final int COLOR_HEADER = 0xFFFF8800;
 
@@ -329,6 +329,20 @@ public class DryStreakTracker implements HudRenderCallback {
         lines.add(new TextLine("Lifetime: " + data.totalLifetimePulls + " pulls, "
                 + data.mythicsFound + " mythics", COLOR_LABEL));
 
+        // Expected mythic comparison (based on 1/2500 rate)
+        if (data.totalLifetimePulls > 0) {
+            double expectedMythics = data.totalLifetimePulls * MYTHIC_RATE;
+            lines.add(new TextLine(String.format("Expected: %.1f mythics (%d pulls)",
+                    expectedMythics, data.totalLifetimePulls), COLOR_LABEL));
+        }
+
+        // Percentile context for current dry streak
+        if (dryPulls > 0) {
+            double pctFound = (1.0 - Math.pow(1.0 - MYTHIC_RATE, dryPulls)) * 100.0;
+            lines.add(new TextLine(String.format("%.0f%% would have found one by now",
+                    pctFound), COLOR_LABEL));
+        }
+
         // Longest dry streak (if meaningful)
         if (data.longestDryStreak > 0) {
             lines.add(new TextLine("Longest: " + data.longestDryStreak + " pulls",
@@ -361,10 +375,12 @@ public class DryStreakTracker implements HudRenderCallback {
 
     private record TextLine(String text, int color) {}
 
+    private static final double MYTHIC_RATE = 1.0 / 2500.0;
+
     private int getDryStreakColor(long pulls) {
-        if (pulls >= 2000) return COLOR_RED;
-        if (pulls >= 1000) return COLOR_ORANGE;
-        if (pulls >= 500) return COLOR_YELLOW;
+        if (pulls >= 5000) return COLOR_RED;
+        if (pulls >= 2500) return COLOR_ORANGE;
+        if (pulls >= 1250) return COLOR_YELLOW;
         return COLOR_WHITE;
     }
 

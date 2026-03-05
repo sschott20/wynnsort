@@ -41,6 +41,7 @@ public class CrowdsourceCollector {
     private static final String MOD_VERSION = "1.0.0";
 
     private ScheduledExecutorService flushExecutor;
+    private boolean flushBroken = false;
 
     private CrowdsourceCollector() {}
 
@@ -50,6 +51,14 @@ public class CrowdsourceCollector {
      */
     public void init() {
         CrowdsourceClient.INSTANCE.init();
+
+        // Pre-load CrowdsourceQueue on main thread to avoid classloader issues on daemon thread
+        try {
+            int preload = CrowdsourceQueue.INSTANCE.size();
+            LOG.info("CrowdsourceQueue pre-loaded (size: {})", preload);
+        } catch (Throwable t) {
+            LOG.warn("CrowdsourceQueue failed to pre-load: {}", t.getMessage());
+        }
 
         int flushMinutes = WynnSortConfig.INSTANCE.crowdsourceFlushMinutes;
         if (flushMinutes < 1) flushMinutes = 5;
@@ -219,6 +228,7 @@ public class CrowdsourceCollector {
      * Drains the queue and submits entries to storage.
      */
     private void flushQueue() {
+        if (flushBroken) return;
         try {
             List<CrowdsourceEntry> entries = CrowdsourceQueue.INSTANCE.drain();
             if (entries.isEmpty()) return;
@@ -230,6 +240,10 @@ public class CrowdsourceCollector {
             LOG.event("flush_completed", evtData);
         } catch (Exception e) {
             LOG.error("Crowdsource: flush failed", e);
+            if (e.getMessage() != null && e.getMessage().contains("Failed to load class file")) {
+                LOG.error("Crowdsource: class loading failure, disabling flush");
+                flushBroken = true;
+            }
         }
     }
 }
