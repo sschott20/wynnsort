@@ -26,7 +26,7 @@ Thumbs.db
 libs/
 
 # Compiled class stubs
-com/
+/com/
 
 # Fabric
 remappedSrc/

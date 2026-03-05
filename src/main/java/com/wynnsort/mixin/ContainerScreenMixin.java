@@ -184,6 +184,11 @@ public abstract class ContainerScreenMixin extends Screen {
 
     @Unique
     private void wynnsort$saveCurrentAsPreset(int index) {
+        // Clean up any existing preset name input first
+        if (wynnsort$presetNameInput != null) {
+            this.removeWidget(wynnsort$presetNameInput);
+            wynnsort$presetNameInput = null;
+        }
         wynnsort$editingPresetIndex = index;
         int x = leftPos + imageWidth + 8;
         int presetNameY = topPos + 58;
@@ -191,8 +196,9 @@ public abstract class ContainerScreenMixin extends Screen {
         wynnsort$presetNameInput.setMaxLength(24);
         wynnsort$presetNameInput.setHint(Component.literal("Preset " + (index + 1)));
         wynnsort$presetNameInput.setValue("Preset " + (index + 1));
-        wynnsort$presetNameInput.setFocused(true);
         this.addRenderableWidget(wynnsort$presetNameInput);
+        // Set Screen-level focus so charTyped dispatches to this widget exclusively
+        this.setFocused(wynnsort$presetNameInput);
     }
 
     @Unique
