@@ -122,16 +122,18 @@ public class DryStreakTracker implements HudRenderCallback {
 
         ensureLoaded();
 
-        int pulls = event.getRewardPulls();
-        LOG.info("Lootrun completed: {} reward pulls, {} challenges, {}s elapsed",
-                pulls, event.getChallengesCompleted(), event.getTimeElapsed());
+        int rawPulls = event.getRewardPulls();
+        int rerolls = event.getRewardRerolls();
+        int effectivePulls = rawPulls * (rerolls + 1);
+        LOG.info("Lootrun completed: {} raw pulls x {} rerolls = {} effective, {} challenges, {}s elapsed",
+                rawPulls, rerolls + 1, effectivePulls, event.getChallengesCompleted(), event.getTimeElapsed());
 
-        // Store pending pulls — mythic detection happens via container scanning
-        pendingPulls = pulls;
-        data.currentRunPulls = pulls;
+        // Store effective pulls — mythic detection happens via container scanning
+        pendingPulls = effectivePulls;
+        data.currentRunPulls = effectivePulls;
 
         // Update lifetime totals
-        data.totalLifetimePulls += pulls;
+        data.totalLifetimePulls += effectivePulls;
 
         // Schedule finalization after a short delay to allow container scan to complete.
         // The container content event fires before/during the lootrun finish event,
