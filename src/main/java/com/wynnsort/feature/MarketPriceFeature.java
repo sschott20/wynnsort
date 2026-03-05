@@ -1,193 +1,178 @@
 package com.wynnsort.feature;
 
-import com.wynnsort.WynnSortMod;
 import com.wynnsort.config.WynnSortConfig;
 import com.wynnsort.util.FeatureLogger;
-import com.wynnsort.market.CrowdsourceClient;
-import com.wynnsort.market.MarketPriceEntry;
 import com.wynnsort.market.MarketPriceStore;
 import com.wynnsort.market.PriceHistoryStore;
-import com.wynnsort.market.PriceStats;
-import com.wynnsort.market.PriceTrend;
 import com.wynnsort.util.DiagnosticLog;
 import com.wynnsort.util.ItemNameHelper;
 import com.wynntils.core.components.Models;
 import com.wynntils.mc.event.ContainerSetContentEvent;
-import com.wynntils.mc.event.ItemTooltipRenderEvent;
-import com.wynntils.models.items.WynnItem;
+import com.wynntils.mc.event.ContainerSetSlotEvent;
 import com.wynntils.models.trademarket.type.TradeMarketPriceInfo;
 import com.wynntils.models.trademarket.type.TradeMarketState;
+import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.TooltipFlag;
 import net.neoforged.bus.api.SubscribeEvent;
 
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class MarketPriceFeature {
 
     public static final MarketPriceFeature INSTANCE = new MarketPriceFeature();
     private static final FeatureLogger LOG = new FeatureLogger("Price", DiagnosticLog.Category.MARKET_PRICE);
 
+    private static final Pattern FORMATTING_CODES = Pattern.compile("\u00A7.");
+    // Matches a number (with optional commas) followed by the emerald symbol ² (U+00B2)
+    private static final Pattern EMERALD_PRICE_PATTERN = Pattern.compile("(\\d[\\d,]*)\\u00B2");
+    // Trade market container uses slots 0-44 for listings; 45+ is UI buttons and player inventory
+    private static final int MAX_TRADE_SLOT = 44;
+
     private MarketPriceFeature() {}
+
+    private boolean isTradeMarketBrowsing() {
+        try {
+            TradeMarketState state = Models.TradeMarket.getTradeMarketState();
+            return state == TradeMarketState.DEFAULT_RESULTS
+                    || state == TradeMarketState.FILTERED_RESULTS;
+        } catch (Exception e) {
+            return false;
+        }
+    }
 
     @SubscribeEvent
     public void onContainerContent(ContainerSetContentEvent.Post event) {
         if (!WynnSortConfig.INSTANCE.marketPriceCacheEnabled) return;
-
-        TradeMarketState state;
-        try {
-            state = Models.TradeMarket.getTradeMarketState();
-        } catch (Exception e) {
-            LOG.info("failed to get trade market state", e);
-            return;
-        }
-
-        // Only capture from search result screens
-        if (state != TradeMarketState.DEFAULT_RESULTS && state != TradeMarketState.FILTERED_RESULTS) {
-            return;
-        }
+        if (!isTradeMarketBrowsing()) return;
 
         List<ItemStack> items = event.getItems();
         if (items == null) return;
 
-        LOG.info("processing {} items in state {}", items.size(), state);
-
         long now = System.currentTimeMillis();
         int recorded = 0;
-        for (ItemStack stack : items) {
+        int limit = Math.min(items.size(), MAX_TRADE_SLOT + 1);
+        for (int i = 0; i < limit; i++) {
+            ItemStack stack = items.get(i);
             if (stack == null || stack.isEmpty()) continue;
-
-            try {
-                // Exploratory: log WynnItem class names for discovering interfaces
-                Optional<WynnItem> wynnOpt = Models.Item.getWynnItem(stack);
-                String wynnType = wynnOpt.map(w -> w.getClass().getSimpleName()).orElse("none");
-                String wynnFullClass = wynnOpt.map(w -> w.getClass().getName()).orElse("none");
-                String hoverName = stack.getHoverName().getString();
-                LOG.info("Item: hover='{}', wynnType={}, fullClass={}", hoverName, wynnType, wynnFullClass);
-
-                String baseName = ItemNameHelper.extractBaseName(stack);
-                if (baseName == null) {
-                    LOG.info("null baseName for '{}' (WynnItem={})", hoverName, wynnType);
-                    continue;
-                }
-
-                TradeMarketPriceInfo priceInfo = Models.TradeMarket.calculateItemPriceInfo(stack);
-                if (priceInfo == null || priceInfo == TradeMarketPriceInfo.EMPTY || priceInfo.price() <= 0) {
-                    LOG.info("no price for '{}' (priceInfo={})", baseName,
-                            priceInfo == null ? "null" : priceInfo == TradeMarketPriceInfo.EMPTY ? "EMPTY" : "price=" + priceInfo.price());
-                    continue;
-                }
-
-                MarketPriceStore.record(baseName, priceInfo.price(), now);
-                PriceHistoryStore.record(baseName, priceInfo.price(), now);
-                recorded++;
-                LOG.info("recorded {}={} emeralds", baseName, priceInfo.price());
-                DiagnosticLog.event(DiagnosticLog.Category.TRADE_MARKET, "price_recorded",
-                        Map.of("item", baseName, "price", priceInfo.price()));
-            } catch (Exception e) {
-                LOG.warn("exception processing item '{}'", stack.getHoverName().getString(), e);
-            }
+            if (recordPrice(stack, now)) recorded++;
         }
-        LOG.info("recorded {}/{} items", recorded, items.size());
+        if (recorded > 0) {
+            LOG.info("recorded {}/{} items from container content", recorded, limit);
+        }
     }
 
+    /**
+     * Captures prices from individual slot updates — this is how trade market
+     * listings actually arrive (the server sends them one slot at a time after
+     * the initial container content event).
+     */
     @SubscribeEvent
-    public void onTooltip(ItemTooltipRenderEvent.Pre event) {
+    public void onSlotUpdate(ContainerSetSlotEvent.Post event) {
         if (!WynnSortConfig.INSTANCE.marketPriceCacheEnabled) return;
 
+        int slot = event.getSlot();
+        if (slot < 0 || slot > MAX_TRADE_SLOT) return;
+
+        if (!isTradeMarketBrowsing()) return;
+
         ItemStack stack = event.getItemStack();
-        if (stack.isEmpty()) return;
+        if (stack == null || stack.isEmpty()) return;
 
-        String baseName = ItemNameHelper.extractBaseName(stack);
-        if (baseName == null) return;
+        long now = System.currentTimeMillis();
+        recordPrice(stack, now);
+    }
 
-        MarketPriceEntry entry = MarketPriceStore.getPrice(baseName);
-        if (entry == null && !WynnSortConfig.INSTANCE.crowdsourceEnabled) return;
+    /**
+     * Attempts to extract and record a price from a trade market item.
+     * Tries Wynntils API first, then falls back to parsing the trade market lore.
+     */
+    private boolean recordPrice(ItemStack stack, long now) {
+        try {
+            String baseName = ItemNameHelper.extractBaseName(stack);
+            if (baseName == null) return false;
 
-        List<Component> tooltips = new java.util.ArrayList<>(event.getTooltips());
-        int insertIndex = tooltips.size() > 1 ? 1 : tooltips.size();
-        int linesAdded = 0;
-
-        // Build the main price line with optional trend arrow
-        if (entry != null) {
-            String priceStr = formatEmeralds(entry.price);
-            String ageStr = formatAge(System.currentTimeMillis() - entry.timestamp);
-            PriceStats stats = WynnSortConfig.INSTANCE.priceHistoryEnabled
-                    ? PriceHistoryStore.getStats(baseName) : null;
-
-            StringBuilder mainLine = new StringBuilder();
-            mainLine.append("\u00A77Market: \u00A7e").append(priceStr);
-            mainLine.append(" \u00A78(").append(ageStr).append(" ago)");
-
-            if (stats != null && stats.trend() != PriceTrend.UNKNOWN) {
-                mainLine.append(" ");
-                switch (stats.trend()) {
-                    case RISING -> mainLine.append("\u00A7a\u25B2"); // green up arrow
-                    case FALLING -> mainLine.append("\u00A7c\u25BC"); // red down arrow
-                    case STABLE -> mainLine.append("\u00A77\u2500"); // gray dash
-                    default -> {} // UNKNOWN - no arrow
-                }
-            }
-
-            tooltips.add(insertIndex + linesAdded, Component.literal(mainLine.toString()));
-            linesAdded++;
-
-            // Add buyer cost with tax
-            int taxPercent = WynnSortConfig.INSTANCE.tradeMarketBuyTaxPercent;
-            if (taxPercent > 0) {
-                long buyerCost = entry.price + (entry.price * taxPercent / 100);
-                String taxLine = "\u00A77w/ " + taxPercent + "% tax: \u00A7e" + formatEmeralds(buyerCost);
-                tooltips.add(insertIndex + linesAdded, Component.literal(taxLine));
-                linesAdded++;
-            }
-
-            // Add range line if we have history data
-            if (stats != null && stats.count() > 1) {
-                String minStr = formatEmeralds(stats.min());
-                String maxStr = formatEmeralds(stats.max());
-                String rangeLine = "\u00A77Range: \u00A7f" + minStr + " \u00A77- \u00A7f" + maxStr
-                        + " \u00A78(" + stats.count() + " seen)";
-                tooltips.add(insertIndex + linesAdded, Component.literal(rangeLine));
-                linesAdded++;
-            }
-        }
-
-        // Add crowdsource local aggregation line
-        if (WynnSortConfig.INSTANCE.crowdsourceEnabled) {
+            // Try Wynntils API first
+            long price = -1;
             try {
-                CrowdsourceClient.LocalAggregation localAgg =
-                        CrowdsourceClient.INSTANCE.getLocalAggregation(baseName);
-                if (localAgg != null && localAgg.count > 0) {
-                    String avgStr = formatEmeralds(localAgg.avg);
-                    String localLine = "\u00A77Local avg: \u00A7b" + avgStr
-                            + " \u00A78(" + localAgg.count + " seen)";
-                    tooltips.add(insertIndex + linesAdded, Component.literal(localLine));
-                    linesAdded++;
+                TradeMarketPriceInfo priceInfo = Models.TradeMarket.calculateItemPriceInfo(stack);
+                if (priceInfo != null && priceInfo != TradeMarketPriceInfo.EMPTY && priceInfo.price() > 0) {
+                    price = priceInfo.price();
                 }
+            } catch (Exception ignored) {}
 
-                // Add community data line if available
-                CrowdsourceClient.CommunityPriceData community =
-                        CrowdsourceClient.INSTANCE.getCommunityData(baseName);
-                if (community != null && community.listingCount > 0) {
-                    String communityAvgStr = formatEmeralds(community.avgPrice);
-                    String communityLine = "\u00A77Community: \u00A7d" + communityAvgStr
-                            + " avg \u00A78(" + community.listingCount + " listings)";
-                    tooltips.add(insertIndex + linesAdded, Component.literal(communityLine));
-                    linesAdded++;
-                }
-            } catch (Exception e) {
-                LOG.warn("Crowdsource tooltip error: {}", e.getMessage());
+            // Fall back to parsing price from trade market lore
+            if (price <= 0) {
+                price = extractPriceFromTradeLore(stack);
             }
-        }
 
-        if (linesAdded > 0) {
-            event.setTooltips(tooltips);
+            if (price <= 0) return false;
+
+            MarketPriceStore.record(baseName, price, now);
+            PriceHistoryStore.record(baseName, price, now);
+            LOG.info("recorded {}={} emeralds", baseName, price);
+            DiagnosticLog.event(DiagnosticLog.Category.TRADE_MARKET, "price_recorded",
+                    Map.of("item", baseName, "price", price));
+            return true;
+        } catch (Exception e) {
+            LOG.warn("exception recording price for '{}'", stack.getHoverName().getString(), e);
+            return false;
         }
     }
 
-    private static String formatEmeralds(long price) {
+    /**
+     * Extracts the per-unit listing price from trade market item lore.
+     * Wynncraft trade market lore has a "Price" header line followed by a line
+     * containing the emerald amount in the format: {number}² (where ² is U+00B2).
+     * Example: "§f§m15,750§7§m²§b ✮ 15,450§3² §8(3¼² 49²½ 26²)"
+     * The first {number}² before the denomination parentheses is the per-unit price.
+     */
+    private static long extractPriceFromTradeLore(ItemStack stack) {
+        try {
+            Minecraft mc = Minecraft.getInstance();
+            var ctx = mc.level != null
+                    ? net.minecraft.world.item.Item.TooltipContext.of(mc.level)
+                    : net.minecraft.world.item.Item.TooltipContext.EMPTY;
+            List<Component> lore = stack.getTooltipLines(ctx, mc.player, TooltipFlag.NORMAL);
+            if (lore == null) return -1;
+
+            boolean foundPriceHeader = false;
+            for (Component line : lore) {
+                String text = line.getString();
+                if (text == null || text.isEmpty()) continue;
+
+                String stripped = FORMATTING_CODES.matcher(text).replaceAll("");
+
+                if (!foundPriceHeader) {
+                    if (stripped.contains("Price")) {
+                        foundPriceHeader = true;
+                    }
+                    continue;
+                }
+
+                // This line follows the Price header — extract the per-unit emerald price.
+                // Remove denomination breakdown in parentheses to avoid false matches
+                // like "49²½" (emerald blocks) being parsed as 49 emeralds.
+                int parenIdx = stripped.indexOf('(');
+                String pricePart = parenIdx >= 0 ? stripped.substring(0, parenIdx) : stripped;
+
+                Matcher m = EMERALD_PRICE_PATTERN.matcher(pricePart);
+                if (m.find()) {
+                    return Long.parseLong(m.group(1).replace(",", ""));
+                }
+                break; // Only check the line immediately after the Price header
+            }
+        } catch (Exception e) {
+            LOG.warn("lore price extraction error: {}", e.getMessage());
+        }
+        return -1;
+    }
+
+    public static String formatEmeralds(long price) {
         if (price >= 262144) {
             double stx = price / 262144.0;
             return String.format("%.1fstx", stx);
@@ -202,7 +187,7 @@ public class MarketPriceFeature {
         }
     }
 
-    private static String formatAge(long ms) {
+    public static String formatAge(long ms) {
         if (ms < 60_000) return "now";
         long minutes = ms / 60_000;
         if (minutes < 60) return minutes + "m";

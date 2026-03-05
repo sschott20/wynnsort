@@ -81,9 +81,13 @@ public class TradeMarketLogger {
     private String pendingItemName = null;
     private long pendingPrice = -1;
 
-    // Pending sell context (captured during SELLING state)
-    private String pendingSellItemName = null;
-    private long pendingSellPrice = -1;
+    // Pending sell contexts — one per listing, keyed by lowercase base name.
+    // Sells are asynchronous (item sells after player leaves trade market),
+    // so we must track each listing separately.
+    private record PendingSellContext(String itemName, String baseName, String fingerprint, long price) {}
+    private final LinkedHashMap<String, PendingSellContext> pendingSells = new LinkedHashMap<>();
+    // Tracks the base name of the item currently being listed (for slot-update price capture)
+    private String currentSellBaseName = null;
 
     // Item name from "Finished buying/selling [item]" chat message
     // More reliable than pending context since it comes from the server
@@ -92,8 +96,6 @@ public class TradeMarketLogger {
     // Pending fingerprint data for buy/sell context
     private String pendingBaseName = null;
     private String pendingFingerprint = null;
-    private String pendingSellBaseName = null;
-    private String pendingSellFingerprint = null;
 
     // Sell screen overlay: matched buy price to show when selling
     private static volatile TransactionRecord matchedBuyRecord = null;
@@ -132,9 +134,10 @@ public class TradeMarketLogger {
         DiagnosticLog.event(DiagnosticLog.Category.TRADE_MARKET, "state_change",
                 Map.of("from", String.valueOf(oldState), "to", String.valueOf(newState)));
 
-        // Clear sell overlay when leaving SELLING state
+        // Clear sell overlay and current-sell tracker when leaving SELLING state
         if (oldState == TradeMarketState.SELLING && newState != TradeMarketState.SELLING) {
             matchedBuyRecord = null;
+            currentSellBaseName = null;
         }
 
         lastKnownState = newState;
@@ -236,11 +239,16 @@ public class TradeMarketLogger {
                     pendingPrice = price;
                     tmLog("Buy price captured from slot update {}: {}", slot, price);
                 }
-            } else if (state == TradeMarketState.SELLING && pendingSellPrice < 0) {
-                long price = extractPriceFromStack(stack);
-                if (price > 0) {
-                    pendingSellPrice = price;
-                    tmLog("Sell price captured from slot update {}: {}", slot, price);
+            } else if (state == TradeMarketState.SELLING && currentSellBaseName != null) {
+                String key = currentSellBaseName.toLowerCase();
+                PendingSellContext existing = pendingSells.get(key);
+                if (existing != null && existing.price < 0) {
+                    long price = extractPriceFromStack(stack);
+                    if (price > 0) {
+                        pendingSells.put(key, new PendingSellContext(
+                                existing.itemName, existing.baseName, existing.fingerprint, price));
+                        tmLog("Sell price captured from slot update {}: {}", slot, price);
+                    }
                 }
             }
         }
@@ -535,17 +543,22 @@ public class TradeMarketLogger {
                 }
             }
 
-            if (foundItem != null) {
-                pendingSellItemName = ItemNameHelper.cleanItemName(foundItem);
-                pendingSellBaseName = foundBase;
-                pendingSellFingerprint = foundFingerprint;
-            }
-            if (foundPrice > 0) {
-                pendingSellPrice = foundPrice;
-            }
-
-            // Look up matching buy record for the sell overlay
             if (foundBase != null) {
+                String cleanName = foundItem != null ? ItemNameHelper.cleanItemName(foundItem) : foundBase;
+                String key = foundBase.toLowerCase();
+                pendingSells.put(key, new PendingSellContext(
+                        cleanName, foundBase, foundFingerprint,
+                        foundPrice > 0 ? foundPrice : -1));
+                currentSellBaseName = foundBase;
+
+                // Keep map bounded (oldest entries evicted first)
+                while (pendingSells.size() > 20) {
+                    var it = pendingSells.entrySet().iterator();
+                    it.next();
+                    it.remove();
+                }
+
+                // Look up matching buy record for the sell overlay
                 TransactionRecord match = TransactionStore.findMatchingBuy(foundBase, foundFingerprint);
                 matchedBuyRecord = match;
                 if (match != null) {
@@ -554,12 +567,12 @@ public class TradeMarketLogger {
                 } else {
                     tmLog("Sell overlay: no matching buy found for \"{}\"", foundBase);
                 }
-            }
 
-            tmLog("Pending sell captured: item=\"{}\", base=\"{}\", fingerprint={}, price={}",
-                    pendingSellItemName, foundBase,
-                    foundFingerprint != null ? "yes(" + foundFingerprint.length() + "chars)" : "null",
-                    pendingSellPrice);
+                tmLog("Pending sell captured: item=\"{}\", base=\"{}\", fingerprint={}, price={}",
+                        cleanName, foundBase,
+                        foundFingerprint != null ? "yes(" + foundFingerprint.length() + "chars)" : "null",
+                        foundPrice);
+            }
         } catch (Exception e) {
             tmWarn("Error capturing sell context", e);
         }
@@ -695,11 +708,6 @@ public class TradeMarketLogger {
         // Prefer item name from "Finished selling [item]" chat message (most reliable)
         String name = lastFinishedItemName;
 
-        // Fallback to pending context from SELLING container
-        if (name == null || name.isEmpty()) {
-            name = pendingSellItemName;
-        }
-
         // Fallback: use Wynntils API
         if (name == null || name.isEmpty()) {
             try {
@@ -714,29 +722,17 @@ public class TradeMarketLogger {
             name = "Sold Item";
         }
 
-        // Use pending sell price if names match (flexible matching to handle
-        // unidentified items where chat says "Propeller Hat" but container
-        // captured "Unidentified Propeller Hat")
-        long price = 0;
-        String baseName = pendingSellBaseName;
-        String fingerprint = pendingSellFingerprint;
-        if (pendingSellPrice > 0) {
-            boolean match = pendingSellItemName == null
-                    || pendingSellItemName.equalsIgnoreCase(name)
-                    || containsIgnoreCase(name, pendingSellItemName)
-                    || containsIgnoreCase(pendingSellItemName, name)
-                    || (pendingSellBaseName != null && (
-                            pendingSellBaseName.equalsIgnoreCase(name)
-                            || containsIgnoreCase(name, pendingSellBaseName)
-                            || containsIgnoreCase(pendingSellBaseName, name)));
-            if (match) {
-                price = pendingSellPrice;
-            } else {
-                tmWarn("Sell name mismatch: chat=\"{}\", pending=\"{}\", base=\"{}\". Using price anyway.",
-                        name, pendingSellItemName, pendingSellBaseName);
-                // Still use the price — sell flow is linear, stale data is unlikely
-                price = pendingSellPrice;
-            }
+        // Look up the matching pending sell context from the map.
+        // Sells are asynchronous — the user may have listed many items and
+        // they sell in arbitrary order, so we match by name.
+        PendingSellContext ctx = findAndRemovePendingSell(name);
+
+        long price = ctx != null && ctx.price > 0 ? ctx.price : 0;
+        String baseName = ctx != null ? ctx.baseName : null;
+        String fingerprint = ctx != null ? ctx.fingerprint : null;
+
+        if (ctx == null) {
+            tmWarn("No matching pending sell context for \"{}\". Recording with price=0.", name);
         }
 
         tmLog("Committing SELL: item=\"{}\", base=\"{}\", price={}", name, baseName, price);
@@ -748,12 +744,37 @@ public class TradeMarketLogger {
         DiagnosticLog.event(DiagnosticLog.Category.TRADE_MARKET, "transaction",
                 Map.of("type", "SELL", "item", name, "price", price));
 
-        pendingSellItemName = null;
-        pendingSellPrice = -1;
-        pendingSellBaseName = null;
-        pendingSellFingerprint = null;
         lastFinishedItemName = null;
         matchedBuyRecord = null;
+    }
+
+    /**
+     * Find and remove a pending sell context that matches the given item name.
+     * Uses flexible matching to handle unidentified items (chat says "Grandmother"
+     * but container captured "Unidentified Grandmother" with base "Grandmother").
+     */
+    private PendingSellContext findAndRemovePendingSell(String name) {
+        if (name == null || pendingSells.isEmpty()) return null;
+        String lower = name.toLowerCase();
+
+        // Exact match on base name key
+        PendingSellContext exact = pendingSells.remove(lower);
+        if (exact != null) return exact;
+
+        // Fuzzy match: check if chat name contains or is contained by a pending key
+        for (var it = pendingSells.entrySet().iterator(); it.hasNext(); ) {
+            var entry = it.next();
+            String key = entry.getKey();
+            PendingSellContext ctx = entry.getValue();
+            if (containsIgnoreCase(name, key) || containsIgnoreCase(key, name)
+                    || (ctx.itemName != null && (
+                            containsIgnoreCase(name, ctx.itemName)
+                            || containsIgnoreCase(ctx.itemName, name)))) {
+                it.remove();
+                return ctx;
+            }
+        }
+        return null;
     }
 
     // ────────────────────────────────────────────────────────────────────

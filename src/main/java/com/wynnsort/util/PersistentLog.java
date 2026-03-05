@@ -4,22 +4,32 @@ import net.fabricmc.loader.api.FabricLoader;
 
 import java.io.BufferedWriter;
 import java.io.IOException;
+import java.io.OutputStream;
+import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
+import java.util.zip.GZIPOutputStream;
 
 /**
- * Persistent log file that appends across game sessions.
- * Writes to config/wynnsort/wynnsort.log.
+ * Per-session log file with Minecraft-style rotation.
+ * Current session writes to config/wynnsort/logs/latest.log.
+ * On each new session, the previous latest.log is compressed to
+ * {date}-{n}.log.gz and old archives are pruned.
  */
 public final class PersistentLog {
 
-    private static final Path LOG_PATH = FabricLoader.getInstance().getConfigDir()
-            .resolve("wynnsort").resolve("wynnsort.log");
+    private static final Path LOGS_DIR = FabricLoader.getInstance().getConfigDir()
+            .resolve("wynnsort").resolve("logs");
+    private static final Path LOG_PATH = LOGS_DIR.resolve("latest.log");
     private static final DateTimeFormatter TIMESTAMP_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
-    private static final long MAX_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB
+    private static final int MAX_ARCHIVED_LOGS = 10;
 
     private static BufferedWriter writer;
 
@@ -27,10 +37,11 @@ public final class PersistentLog {
 
     public static synchronized void init() {
         try {
-            Files.createDirectories(LOG_PATH.getParent());
-            rotateIfNeeded();
+            Files.createDirectories(LOGS_DIR);
+            archivePreviousSession();
+            // Start fresh — overwrite, not append
             writer = Files.newBufferedWriter(LOG_PATH,
-                    StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+                    StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
             write("INFO", "--- Session started ---");
         } catch (IOException e) {
             // Fall back silently; persistent logging is best-effort
@@ -86,12 +97,50 @@ public final class PersistentLog {
         return sb.toString();
     }
 
-    private static void rotateIfNeeded() throws IOException {
-        if (!Files.exists(LOG_PATH)) return;
-        if (Files.size(LOG_PATH) > MAX_SIZE_BYTES) {
-            Path old = LOG_PATH.resolveSibling("wynnsort.log.old");
-            Files.deleteIfExists(old);
-            Files.move(LOG_PATH, old);
+    /**
+     * Compresses the previous latest.log to {date}-{n}.log.gz, then prunes
+     * old archives beyond MAX_ARCHIVED_LOGS.
+     */
+    private static void archivePreviousSession() {
+        try {
+            if (!Files.exists(LOG_PATH) || Files.size(LOG_PATH) == 0) return;
+
+            String datePrefix = LocalDate.now().toString(); // e.g. 2026-03-05
+            int seq = 1;
+            Path archivePath;
+            do {
+                archivePath = LOGS_DIR.resolve(datePrefix + "-" + seq + ".log.gz");
+                seq++;
+            } while (Files.exists(archivePath));
+
+            // Compress latest.log → archive
+            try (var in = Files.newInputStream(LOG_PATH);
+                 OutputStream out = new GZIPOutputStream(Files.newOutputStream(archivePath))) {
+                in.transferTo(out);
+            }
+
+            pruneOldArchives();
+        } catch (IOException ignored) {
+            // Best-effort — don't block startup
+        }
+    }
+
+    private static void pruneOldArchives() throws IOException {
+        List<Path> archives = new ArrayList<>();
+        try (DirectoryStream<Path> stream = Files.newDirectoryStream(LOGS_DIR, "*.log.gz")) {
+            for (Path p : stream) {
+                archives.add(p);
+            }
+        }
+
+        if (archives.size() <= MAX_ARCHIVED_LOGS) return;
+
+        // Sort oldest first (by filename, which is date-based)
+        archives.sort(Comparator.comparing(p -> p.getFileName().toString()));
+
+        int toRemove = archives.size() - MAX_ARCHIVED_LOGS;
+        for (int i = 0; i < toRemove; i++) {
+            Files.deleteIfExists(archives.get(i));
         }
     }
 }

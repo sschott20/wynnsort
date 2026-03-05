@@ -218,26 +218,50 @@ public class WynnSortMod implements ClientModInitializer {
             logError("[WynnSort] Failed to initialize dry streak tracker", e);
         }
 
-        // Register sell screen overlay — shows buy price when selling a previously bought item
+        // Register screen overlays — sell price + market price HUD
         ScreenEvents.AFTER_INIT.register((client2, screen, scaledWidth, scaledHeight) -> {
             ScreenEvents.afterRender(screen).register((screen2, guiGraphics, mouseX, mouseY, tickDelta) -> {
-                TransactionRecord match = TradeMarketLogger.getMatchedBuyRecord();
-                if (match == null || match.priceEmeralds <= 0) return;
-
                 Minecraft mc = Minecraft.getInstance();
-                int taxPercent = WynnSortConfig.INSTANCE.tradeMarketBuyTaxPercent;
-                long buyPrice = match.priceEmeralds;
-                if (taxPercent > 0) {
-                    buyPrice = buyPrice + (buyPrice * taxPercent / 100);
-                }
-                String text = "Bought for: " + TransactionListWidget.Entry.formatPrice(buyPrice);
-                int textWidth = mc.font.width(text);
-                int x = (screen2.width - textWidth) / 2;
                 int y = 4;
 
-                // Background
-                guiGraphics.fill(x - 4, y - 2, x + textWidth + 4, y + 11, 0xCC000000);
-                guiGraphics.drawString(mc.font, text, x, y, 0xFF55FF55);
+                // Sell screen overlay — shows buy price when selling a previously bought item
+                TransactionRecord match = TradeMarketLogger.getMatchedBuyRecord();
+                if (match != null && match.priceEmeralds > 0) {
+                    int taxPercent = WynnSortConfig.INSTANCE.tradeMarketBuyTaxPercent;
+                    long buyPrice = match.priceEmeralds;
+                    if (taxPercent > 0) {
+                        buyPrice = buyPrice + (buyPrice * taxPercent / 100);
+                    }
+                    String text = "Bought for: " + TransactionListWidget.Entry.formatPrice(buyPrice);
+                    int textWidth = mc.font.width(text);
+                    int x = (screen2.width - textWidth) / 2;
+                    guiGraphics.fill(x - 4, y - 2, x + textWidth + 4, y + 11, 0xCC000000);
+                    guiGraphics.drawString(mc.font, text, x, y, 0xFF55FF55);
+                    y += 16;
+                }
+
+                // Market price overlay — shows cached price for hovered item
+                if (WynnSortConfig.INSTANCE.marketPriceCacheEnabled
+                        && screen2 instanceof net.minecraft.client.gui.screens.inventory.AbstractContainerScreen<?> containerScreen) {
+                    net.minecraft.world.inventory.Slot hoveredSlot = containerScreen.hoveredSlot;
+                    if (hoveredSlot != null && hoveredSlot.hasItem()) {
+                        String baseName = com.wynnsort.util.ItemNameHelper.extractBaseName(hoveredSlot.getItem());
+                        if (baseName != null) {
+                            com.wynnsort.market.MarketPriceEntry entry =
+                                    com.wynnsort.market.MarketPriceStore.getPrice(baseName);
+                            if (entry != null) {
+                                String priceStr = com.wynnsort.feature.MarketPriceFeature.formatEmeralds(entry.price);
+                                String ageStr = com.wynnsort.feature.MarketPriceFeature.formatAge(
+                                        System.currentTimeMillis() - entry.timestamp);
+                                String text = "Market: " + priceStr + " (" + ageStr + " ago)";
+                                int textWidth = mc.font.width(text);
+                                int x = (screen2.width - textWidth) / 2;
+                                guiGraphics.fill(x - 4, y - 2, x + textWidth + 4, y + 11, 0xCC000000);
+                                guiGraphics.drawString(mc.font, text, x, y, 0xFFFFFF55);
+                            }
+                        }
+                    }
+                }
             });
         });
 
