@@ -97,7 +97,7 @@ public class LootrunStore {
             } else {
                 stats.failedRuns++;
             }
-            stats.totalPulls += r.pullsEarned;
+            stats.totalPulls += r.pullsEarned * (r.rerollsEarned + 1);
             stats.totalRerolls += r.rerollsEarned;
             stats.totalSacrifices += r.sacrifices;
             stats.totalXp += r.xpEarned;

@@ -62,6 +62,10 @@ public class DryStreakTracker implements HudRenderCallback {
     private static final int COLOR_LABEL  = 0xFFAAAAAA;
     private static final int COLOR_HEADER = 0xFFFF8800;
 
+    /** Whether LootChestDataHelper loaded successfully (Models.LootChest available). */
+    private static boolean lootChestAvailable = false;
+    private static boolean lootChestChecked = false;
+
     // ── Persistent data ──────────────────────────────────────────────
 
     private DryStreakData data = new DryStreakData();
@@ -307,16 +311,42 @@ public class DryStreakTracker implements HudRenderCallback {
     private void renderOverlay(GuiGraphics guiGraphics, Minecraft mc) {
         int screenWidth = mc.getWindow().getGuiScaledWidth();
         int screenHeight = mc.getWindow().getGuiScaledHeight();
-
-        // Compact display: just the dry streak count
-        long dryPulls = data.totalPullsWithoutMythic;
-        int dryColor = getDryStreakColor(dryPulls);
-        String text = "Dry: " + dryPulls + " pulls";
-
         int padding = 4;
-        int textWidth = mc.font.width(text);
-        int boxWidth = textWidth + padding * 2;
-        int boxHeight = mc.font.lineHeight + padding * 2;
+        int lineHeight = mc.font.lineHeight + 2;
+
+        // Build lines to render
+        java.util.List<String> lines = new java.util.ArrayList<>();
+        java.util.List<Integer> colors = new java.util.ArrayList<>();
+
+        // Regular chest dry streak (from Wynntils LootChest model)
+        int dryChests = getWynntilsDryChestCount();
+        int dryItems = getWynntilsDryItemCount();
+
+        if (dryChests >= 0) {
+            String chestLine = "Dry: " + dryChests + " chests";
+            if (dryItems >= 0) {
+                chestLine += " | " + dryItems + " items";
+            }
+            lines.add(chestLine);
+            colors.add(getDryStreakColor(dryChests));
+        }
+
+        // Reward pull dry streak (our own tracking)
+        long dryPulls = data.totalPullsWithoutMythic;
+        if (dryPulls > 0) {
+            lines.add("Pulls: " + dryPulls + " dry");
+            colors.add(getDryStreakColor(dryPulls));
+        }
+
+        if (lines.isEmpty()) return;
+
+        // Calculate box dimensions
+        int maxWidth = 0;
+        for (String line : lines) {
+            maxWidth = Math.max(maxWidth, mc.font.width(line));
+        }
+        int boxWidth = maxWidth + padding * 2;
+        int boxHeight = lines.size() * lineHeight + padding * 2 - 2;
 
         // Position: bottom-right, above hotbar
         int x = screenWidth - boxWidth - 4;
@@ -324,15 +354,23 @@ public class DryStreakTracker implements HudRenderCallback {
 
         // Background
         guiGraphics.fill(x - 2, y - 2, x + boxWidth, y + boxHeight, 0x80000000);
-        guiGraphics.drawString(mc.font, text, x + padding, y + padding, dryColor);
+
+        // Render lines
+        int textY = y + padding;
+        for (int i = 0; i < lines.size(); i++) {
+            guiGraphics.drawString(mc.font, lines.get(i), x + padding, textY, colors.get(i));
+            textY += lineHeight;
+        }
     }
 
     public static final double MYTHIC_RATE = 1.0 / 2500.0;
 
-    private int getDryStreakColor(long pulls) {
-        if (pulls >= 5000) return COLOR_RED;
-        if (pulls >= 2500) return COLOR_ORANGE;
-        if (pulls >= 1250) return COLOR_YELLOW;
+    private int getDryStreakColor(long count) {
+        // Thresholds work for both chest counts and pull counts
+        // (chests ~= pulls since each chest is roughly 1 item-check for mythic)
+        if (count >= 5000) return COLOR_RED;
+        if (count >= 2500) return COLOR_ORANGE;
+        if (count >= 1250) return COLOR_YELLOW;
         return COLOR_WHITE;
     }
 
@@ -351,6 +389,50 @@ public class DryStreakTracker implements HudRenderCallback {
         if (hours > 0) return hours + "h ago";
         if (minutes > 0) return minutes + "m ago";
         return "just now";
+    }
+
+    // ── Wynntils LootChest Integration ─────────────────────────────
+
+    /**
+     * Reads Wynntils' dry chest count (regular loot chests opened without a mythic).
+     * Returns -1 if LootChest model is unavailable.
+     */
+    public int getWynntilsDryChestCount() {
+        checkLootChestAvailable();
+        if (!lootChestAvailable) return -1;
+        try {
+            return com.wynnsort.util.LootChestDataHelper.getDryChestCount();
+        } catch (Throwable t) {
+            return -1;
+        }
+    }
+
+    /**
+     * Reads Wynntils' count of items seen in chests during the dry streak.
+     * Sums all gear tiers from Models.LootChest.dryItemTiers.
+     * Returns -1 if unavailable.
+     */
+    public int getWynntilsDryItemCount() {
+        checkLootChestAvailable();
+        if (!lootChestAvailable) return -1;
+        try {
+            return com.wynnsort.util.LootChestDataHelper.getDryItemCount();
+        } catch (Throwable t) {
+            return -1;
+        }
+    }
+
+    private static void checkLootChestAvailable() {
+        if (lootChestChecked) return;
+        lootChestChecked = true;
+        try {
+            com.wynnsort.util.LootChestDataHelper.getDryChestCount();
+            lootChestAvailable = true;
+            LOG.info("Wynntils LootChest model available — chest/item tracking enabled");
+        } catch (Throwable t) {
+            lootChestAvailable = false;
+            LOG.info("Wynntils LootChest model not available: {}", t.getMessage());
+        }
     }
 
     // ── Persistence ──────────────────────────────────────────────────
