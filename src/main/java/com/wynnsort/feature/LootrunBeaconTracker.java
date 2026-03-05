@@ -135,6 +135,11 @@ public class LootrunBeaconTracker implements HudRenderCallback {
     /** Snapshot of Wynntils rainbow beacon count when entering CHOOSING_BEACON. */
     private int snapshotRainbowCount = 0;
 
+    /** Timestamp of last periodic state save. */
+    private long lastPeriodicSave = 0;
+
+    /** How often to auto-save state during active lootrun (60 seconds). */
+    private static final long PERIODIC_SAVE_INTERVAL_MS = 60_000;
 
     private LootrunBeaconTracker() {}
 
@@ -225,10 +230,20 @@ public class LootrunBeaconTracker implements HudRenderCallback {
             bootstrapped = true;
         }
 
+        // Save state on lootrun state transitions (not just beacon selection)
+        if (currentState != lastState && currentState != LootrunningState.NOT_RUNNING) {
+            saveState();
+        }
+
         lastState = currentState;
 
-        // Render if we have any active beacon data
+        // Periodic auto-save during active lootruns (every 60s)
         if (hasActiveBeaconData()) {
+            long now = System.currentTimeMillis();
+            if (now - lastPeriodicSave >= PERIODIC_SAVE_INTERVAL_MS) {
+                lastPeriodicSave = now;
+                saveState();
+            }
             renderOverlay(guiGraphics, mc);
         }
     }
@@ -304,6 +319,9 @@ public class LootrunBeaconTracker implements HudRenderCallback {
                             "challenge", challengeNum));
         }
 
+        // Capture pre-decrement rainbow state for vibrant calculations
+        boolean rainbowWasActive = rainbowRemaining > 0;
+
         // Decrement existing duration-based beacons (each selection = one challenge consumed)
         decrementBeacons();
 
@@ -312,7 +330,7 @@ public class LootrunBeaconTracker implements HudRenderCallback {
             LOG.warn("Could not determine beacon type, consuming aqua only");
             consumeAqua();
         } else {
-            processBeaconSelection(selectedKind, wasVibrant);
+            processBeaconSelection(selectedKind, wasVibrant, rainbowWasActive);
         }
 
         LOG.info("  Post state: orange={}, rainbow={}, aquaPending={}, counts={}",
@@ -351,13 +369,14 @@ public class LootrunBeaconTracker implements HudRenderCallback {
 
     /**
      * Process a beacon selection and update all tracking state.
+     * @param rainbowWasActive whether rainbow was active BEFORE decrement (for vibrant calc)
      */
-    private void processBeaconSelection(LootrunBeaconKind kind, boolean wasVibrant) {
+    private void processBeaconSelection(LootrunBeaconKind kind, boolean wasVibrant, boolean rainbowWasActive) {
         String vibrantMarker = wasVibrant ? " (vibrant)" : "";
 
         switch (kind) {
             case ORANGE -> {
-                boolean isVibrant = wasVibrant || rainbowRemaining > 0;
+                boolean isVibrant = wasVibrant || rainbowWasActive;
                 int duration = calculateDuration(5, isVibrant);
                 orangeBeacons.add(duration);
                 LOG.info("  -> ORANGE{}: +{} challenges (aqua={})",
@@ -365,7 +384,7 @@ public class LootrunBeaconTracker implements HudRenderCallback {
                 consumeAqua();
             }
             case RAINBOW -> {
-                boolean isVibrant = wasVibrant || rainbowRemaining > 0;
+                boolean isVibrant = wasVibrant || rainbowWasActive;
                 int duration = calculateDuration(10, isVibrant);
                 rainbowRemaining = Math.max(rainbowRemaining, 0) + duration;
                 LOG.info("  -> RAINBOW{}: +{} (total={})",
@@ -375,7 +394,7 @@ public class LootrunBeaconTracker implements HudRenderCallback {
             case AQUA -> {
                 incrementBeaconCount(LootrunBeaconKind.AQUA);
                 aquaPending = true;
-                aquaWasVibrant = wasVibrant || rainbowRemaining > 0;
+                aquaWasVibrant = wasVibrant || rainbowWasActive;
                 LOG.info("  -> AQUA{}: boost pending, vibrant={}",
                         vibrantMarker, aquaWasVibrant);
                 // Don't consume aqua - aqua sets it
@@ -556,7 +575,7 @@ public class LootrunBeaconTracker implements HudRenderCallback {
                             ageMinutes, state.orangeBeacons, state.rainbowRemaining,
                             state.aquaPending, state.beaconCounts);
 
-                    if (ageMinutes <= 30) {
+                    if (ageMinutes <= 120) {
                         orangeBeacons.clear();
                         orangeBeacons.addAll(state.orangeBeacons);
                         rainbowRemaining = state.rainbowRemaining;
