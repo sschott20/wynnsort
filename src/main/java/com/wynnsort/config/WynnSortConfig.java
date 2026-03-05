@@ -65,8 +65,6 @@ public class WynnSortConfig {
     public int crowdsourceFlushMinutes = 5;
     /** Enable structured diagnostic logging (JSONL events + in-game viewer) */
     public boolean diagnosticLoggingEnabled = true;
-    /** Enable item comparison tooltip (hold Shift to compare vs equipped gear) */
-    public boolean itemComparisonEnabled = true;
 
     // --- Persistence ---
 

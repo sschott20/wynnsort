@@ -186,7 +186,7 @@ public abstract class ContainerScreenMixin extends Screen {
     private void wynnsort$saveCurrentAsPreset(int index) {
         wynnsort$editingPresetIndex = index;
         int x = leftPos + imageWidth + 8;
-        int presetNameY = topPos + 56;
+        int presetNameY = topPos + 58;
         wynnsort$presetNameInput = new EditBox(this.font, x, presetNameY, 120, 14, Component.literal("Preset Name"));
         wynnsort$presetNameInput.setMaxLength(24);
         wynnsort$presetNameInput.setHint(Component.literal("Preset " + (index + 1)));
@@ -305,7 +305,7 @@ public abstract class ContainerScreenMixin extends Screen {
         wynnsort$statsBuilt = true;
         wynnsort$statNames.addAll(stats);
         int x = leftPos + imageWidth + 8;
-        int baseY = WynnSortConfig.INSTANCE.searchPresetsEnabled ? topPos + 58 : topPos + 40;
+        int baseY = WynnSortConfig.INSTANCE.searchPresetsEnabled ? topPos + 76 : topPos + 40;
         int maxRows = Math.min(stats.size(), WYNNSORT$MAX_STAT_ROWS);
         for (int i = 0; i < maxRows; i++) {
             EditBox box = new EditBox(this.font, x + 90, baseY + i * 16, 30, 14, Component.literal(stats.get(i)));
@@ -366,7 +366,7 @@ public abstract class ContainerScreenMixin extends Screen {
         wynnsort$buildStatFilters();
         if (wynnsort$statsBuilt) {
             int x = leftPos + imageWidth + 8;
-            int baseY = WynnSortConfig.INSTANCE.searchPresetsEnabled ? topPos + 58 : topPos + 40;
+            int baseY = WynnSortConfig.INSTANCE.searchPresetsEnabled ? topPos + 76 : topPos + 40;
             int maxRows = Math.min(wynnsort$statNames.size(), wynnsort$statBoxes.size());
             for (int i = 0; i < maxRows; i++) {
                 String name = wynnsort$statNames.get(i);
@@ -398,7 +398,7 @@ public abstract class ContainerScreenMixin extends Screen {
                 }
             }
             if (wynnsort$presetNameInput != null && wynnsort$editingPresetIndex >= 0) {
-                guiGraphics.drawString(this.font, "Name:", leftPos + imageWidth + 8 - 30, topPos + 59, 0xFFCCCCCC);
+                guiGraphics.drawString(this.font, "Name:", leftPos + imageWidth + 8 - 30, topPos + 61, 0xFFCCCCCC);
             }
         }
     }
