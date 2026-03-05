@@ -40,12 +40,15 @@ public class BestItemHighlightFeature {
 
     private int lastBestSlotIndex = -1;
 
+    // Circuit breaker: stop retrying after ScoreComputation fails to load
+    private boolean scoreComputationBroken = false;
+
     private BestItemHighlightFeature() {}
 
     @SubscribeEvent
     public void onContainerRender(ContainerRenderEvent event) {
         try {
-            if (!WynnSortConfig.INSTANCE.overlayEnabled) {
+            if (!WynnSortConfig.INSTANCE.overlayEnabled || scoreComputationBroken) {
                 return;
             }
 
@@ -97,8 +100,9 @@ public class BestItemHighlightFeature {
             int x = bestSlot.x + containerLeft;
             int y = bestSlot.y + containerTop;
             drawBorder(guiGraphics, x, y, 16, 16, GOLD_BORDER_COLOR);
-        } catch (Exception e) {
-            LOG.error("Error in highlight render", e);
+        } catch (Exception | NoClassDefFoundError e) {
+            LOG.error("ScoreComputation failed in highlight, disabling until restart: {}", e.getMessage());
+            scoreComputationBroken = true;
         }
     }
 

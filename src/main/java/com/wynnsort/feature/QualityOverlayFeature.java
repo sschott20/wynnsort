@@ -54,11 +54,15 @@ public class QualityOverlayFeature {
     private boolean firstRenderLogged = false;
     private String lastContainerTitle = null;
 
+    // Circuit breaker: stop retrying after ScoreComputation fails to load
+    private boolean scoreComputationBroken = false;
+
     private QualityOverlayFeature() {}
 
     @SubscribeEvent
     public void onSlotRender(SlotRenderEvent.Post event) {
         if (!WynnSortConfig.INSTANCE.overlayEnabled) return;
+        if (scoreComputationBroken) return;
 
         Minecraft mc = Minecraft.getInstance();
         if (!(mc.screen instanceof AbstractContainerScreen<?> containerScreen)) return;
@@ -89,7 +93,14 @@ public class QualityOverlayFeature {
         if (gearInstanceOpt.isEmpty()) return;
 
         GearInstance gearInstance = gearInstanceOpt.get();
-        float pct = ScoreComputation.computeScore(gearItem, gearInstance, SortState.getFilters());
+        float pct;
+        try {
+            pct = ScoreComputation.computeScore(gearItem, gearInstance, SortState.getFilters());
+        } catch (Exception | NoClassDefFoundError e) {
+            LOG.error("ScoreComputation failed, disabling overlay until restart: {}", e.getMessage());
+            scoreComputationBroken = true;
+            return;
+        }
         if (Float.isNaN(pct) || pct < 0.0f) return;
 
         // Log first successful render per container (exploratory: container title, screen class, item info)
@@ -159,7 +170,14 @@ public class QualityOverlayFeature {
             Optional<GearInstance> gearInstanceOpt = gearItem.getItemInstance();
             if (gearInstanceOpt.isEmpty()) continue;
 
-            float score = ScoreComputation.computeScore(gearItem, gearInstanceOpt.get(), filters);
+            float score;
+            try {
+                score = ScoreComputation.computeScore(gearItem, gearInstanceOpt.get(), filters);
+            } catch (Exception | NoClassDefFoundError e) {
+                LOG.error("ScoreComputation failed in computeRanks, disabling overlay: {}", e.getMessage());
+                scoreComputationBroken = true;
+                return Collections.emptyMap();
+            }
             if (!Float.isNaN(score) && score >= 0.0f) {
                 entries.add(Map.entry(slot.index, score));
             }
