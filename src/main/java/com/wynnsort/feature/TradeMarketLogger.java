@@ -115,6 +115,10 @@ public class TradeMarketLogger {
                                      long price, TransactionRecord.Type type) {}
     private PendingWithdrawal pendingWithdrawal = null;
 
+    /** Tracks sells committed via commitSell() so commitWithdrawal() can skip duplicates.
+     *  Key: lowercase baseName, Value: count of uncommitted chat-committed sells. */
+    private final Map<String, Integer> chatCommittedSells = new LinkedHashMap<>();
+
     /** Hash of last logged container contents, used to deduplicate container dumps. */
     private String lastContainerHash = null;
 
@@ -823,6 +827,20 @@ public class TradeMarketLogger {
         PendingWithdrawal w = pendingWithdrawal;
         pendingWithdrawal = null;
 
+        // Skip if this SELL was already committed via chat message (commitSell path)
+        if (w.type == TransactionRecord.Type.SELL && w.baseName != null) {
+            String key = w.baseName.toLowerCase();
+            Integer count = chatCommittedSells.get(key);
+            if (count != null && count > 0) {
+                if (count == 1) chatCommittedSells.remove(key);
+                else chatCommittedSells.put(key, count - 1);
+                tmLog("Skipping withdrawal SELL for \"{}\" — already committed via chat", w.baseName);
+                // Still clean up pending sell context
+                pendingSells.remove(w.baseName.toLowerCase());
+                return;
+            }
+        }
+
         tmLog("Committing async {}: item=\"{}\", base=\"{}\", price={}",
                 w.type, w.itemName, w.baseName, w.price);
 
@@ -1066,6 +1084,17 @@ public class TradeMarketLogger {
         TransactionStore.addTransaction(new TransactionRecord(
                 name, price, TransactionRecord.Type.SELL, "", 1,
                 baseName, fingerprint));
+
+        // Track that this sell was committed via chat so commitWithdrawal() skips the duplicate
+        if (baseName != null) {
+            chatCommittedSells.merge(baseName.toLowerCase(), 1, Integer::sum);
+            // Keep map bounded
+            while (chatCommittedSells.size() > 50) {
+                var it = chatCommittedSells.entrySet().iterator();
+                it.next();
+                it.remove();
+            }
+        }
 
         DiagnosticLog.event(DiagnosticLog.Category.TRADE_MARKET, "transaction",
                 Map.of("type", "SELL", "item", name, "price", price));
