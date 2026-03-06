@@ -182,9 +182,8 @@ public class LootrunBeaconTracker implements HudRenderCallback {
             return;
         }
 
-        // Log state transitions
+        // Log state transitions (diagnostic event only; text log already emitted above)
         if (currentState != lastState) {
-            LOG.info("Lootrun state: {} -> {}", lastState, currentState);
             DiagnosticLog.event(DiagnosticLog.Category.LOOTRUN, "state_change",
                     Map.of("from", String.valueOf(lastState), "to", String.valueOf(currentState)));
         }
@@ -442,9 +441,13 @@ public class LootrunBeaconTracker implements HudRenderCallback {
     private void decrementBeacons() {
         List<Integer> updated = new ArrayList<>();
         for (int count : orangeBeacons) {
-            int remaining = count - 1;
-            if (remaining > 0) {
-                updated.add(remaining);
+            if (count < 0) {
+                updated.add(count);
+            } else {
+                int remaining = count - 1;
+                if (remaining > 0) {
+                    updated.add(remaining);
+                }
             }
         }
         orangeBeacons.clear();
