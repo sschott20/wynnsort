@@ -195,6 +195,7 @@ public final class DiagnosticLog {
             // Check rotation after write
             if (Files.exists(DIAGNOSTICS_PATH) && Files.size(DIAGNOSTICS_PATH) > MAX_FILE_SIZE) {
                 fileWriter.close();
+                fileWriter = null;
                 rotateIfNeeded();
                 fileWriter = Files.newBufferedWriter(DIAGNOSTICS_PATH,
                         StandardOpenOption.CREATE, StandardOpenOption.APPEND);

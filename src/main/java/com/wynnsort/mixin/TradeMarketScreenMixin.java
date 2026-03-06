@@ -30,7 +30,7 @@ public abstract class TradeMarketScreenMixin extends Screen {
     private TradeMarketSearchResultHolder holder;
 
     @Unique
-    private static final Pattern SORT_PATTERN = Pattern.compile("\\bsort:\\S+");
+    private static final Pattern wynnsort$SORT_PATTERN = Pattern.compile("\\bsort:\\S+");
 
     @Unique
     private Button wynnsort$sortButton;
@@ -56,7 +56,7 @@ public abstract class TradeMarketScreenMixin extends Screen {
 
         // Check if sort is already active in the search text
         String currentText = itemSearchWidget != null ? itemSearchWidget.getTextBoxInput() : "";
-        wynnsort$sortActive = SORT_PATTERN.matcher(currentText).find();
+        wynnsort$sortActive = wynnsort$SORT_PATTERN.matcher(currentText).find();
 
         // Sort toggle button
         wynnsort$sortButton = Button.builder(
@@ -127,7 +127,7 @@ public abstract class TradeMarketScreenMixin extends Screen {
         String token = SortState.getSortToken();
 
         // Remove any existing sort:xxx token first
-        Matcher m = SORT_PATTERN.matcher(currentText);
+        Matcher m = wynnsort$SORT_PATTERN.matcher(currentText);
         String cleaned = m.replaceAll("").trim();
 
         String newText = cleaned.isEmpty() ? token : cleaned + " " + token;
@@ -138,7 +138,7 @@ public abstract class TradeMarketScreenMixin extends Screen {
     private void wynnsort$removeSortToken() {
         if (itemSearchWidget == null) return;
         String currentText = itemSearchWidget.getTextBoxInput();
-        Matcher m = SORT_PATTERN.matcher(currentText);
+        Matcher m = wynnsort$SORT_PATTERN.matcher(currentText);
         String newText = m.replaceAll("").trim();
         itemSearchWidget.setTextBoxInput(newText);
     }
