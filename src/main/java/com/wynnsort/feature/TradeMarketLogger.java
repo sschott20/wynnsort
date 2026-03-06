@@ -158,6 +158,11 @@ public class TradeMarketLogger {
         // Clear sell overlay and current-sell tracker when leaving SELLING state
         if (oldState == TradeMarketState.SELLING && newState != TradeMarketState.SELLING) {
             matchedBuyRecord = null;
+            // Clear the pending sell for the item we were just looking at —
+            // if the sell completed, commitSell() would have already consumed it
+            if (currentSellBaseName != null) {
+                pendingSells.remove(currentSellBaseName.toLowerCase());
+            }
             currentSellBaseName = null;
         }
 
@@ -910,7 +915,7 @@ public class TradeMarketLogger {
             List<StatActualValue> stats = instance.identifications();
             if (stats == null || stats.isEmpty()) return null;
 
-            return "v1:" + stats.stream()
+            String result = "v1:" + stats.stream()
                     .filter(s -> {
                         String api = s.statType().getApiName();
                         if (api == null || api.isEmpty()) {
@@ -926,6 +931,9 @@ public class TradeMarketLogger {
                     .sorted(Comparator.comparing(s -> s.statType().getApiName()))
                     .map(s -> s.statType().getApiName() + ":" + s.value() + ":" + s.stars())
                     .collect(Collectors.joining(","));
+            // If all stats were filtered out, the fingerprint is meaningless
+            if (result.equals("v1:")) return null;
+            return result;
         } catch (Exception e) {
             tmLog("Fingerprint build error: {}", e.getMessage());
         }
