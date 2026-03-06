@@ -54,6 +54,12 @@ public class LootrunHistoryFeature {
             record.chestsOpened = event.getChestsOpened();
             copySessionData(record);
 
+            int durationSeconds = (int) ((record.endTime - record.startTime) / 1000);
+            if (record.challengesCompleted == 0 && durationSeconds < 30) {
+                LOG.info("Skipping trivial lootrun ({}s, 0 challenges)", durationSeconds);
+                return;
+            }
+
             LootrunStore.addRecord(record);
 
             LOG.info("Lootrun COMPLETED: challenges={}, pulls={}, rerolls={}, sacrifices={}, mobs={}, chests={}, rewardChests={}, items={}, location={}, time={}s",
@@ -96,6 +102,12 @@ public class LootrunHistoryFeature {
             record.mobsKilled = 0;
             record.chestsOpened = 0;
             copySessionData(record);
+
+            int durationSeconds = (int) ((record.endTime - record.startTime) / 1000);
+            if (record.challengesCompleted == 0 && durationSeconds < 30) {
+                LOG.info("Skipping trivial lootrun ({}s, 0 challenges)", durationSeconds);
+                return;
+            }
 
             LootrunStore.addRecord(record);
 
