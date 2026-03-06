@@ -83,7 +83,7 @@ public class TooltipFeature {
             if (result == null) {
                 String itemName = gearItem.getItemInfo().name();
                 if (nanWarnedItems.add(itemName)) {
-                    LOG.warn("Score NaN/negative for item={} (further warnings for this item suppressed)", itemName);
+                    LOG.info("Score NaN/negative for item={} (no rollable stats; further messages for this item suppressed)", itemName);
                 }
                 return false;
             }

@@ -162,11 +162,8 @@ public class TradeMarketLogger {
         // Clear sell overlay and current-sell tracker when leaving SELLING state
         if (oldState == TradeMarketState.SELLING && newState != TradeMarketState.SELLING) {
             matchedBuyRecord = null;
-            // Clear the pending sell for the item we were just looking at —
-            // if the sell completed, commitSell() would have already consumed it
-            if (currentSellBaseName != null) {
-                pendingSells.remove(currentSellBaseName.toLowerCase());
-            }
+            // Don't remove from pendingSells here — sells are async, and commitSell()
+            // needs the context when the "Finished selling" chat message arrives later.
             currentSellBaseName = null;
         }
 
@@ -175,10 +172,11 @@ public class TradeMarketLogger {
             pendingWithdrawal = null;
         }
 
-        // Reset default sort flag and clear fulfilled order cache when trade market closes
+        // Reset default sort flag and clear all pending state when trade market closes
         if (newState == TradeMarketState.NOT_ACTIVE) {
             SortState.resetDefaultSort();
             fulfilledOrderTypes.clear();
+            pendingSells.clear();
         }
 
         lastKnownState = newState;
@@ -398,7 +396,12 @@ public class TradeMarketLogger {
                     try {
                         wynnDetail = " itemInfo=" + gi.getItemInfo().name();
                         if (gi.getItemInstance().isPresent()) {
-                            wynnDetail += " overall=" + gi.getItemInstance().get().getOverallPercentage() + "%";
+                            GearInstance inst = gi.getItemInstance().get();
+                            if (inst.identifications().isEmpty()) {
+                                wynnDetail += " overall=N/A";
+                            } else {
+                                wynnDetail += " overall=" + inst.getOverallPercentage() + "%";
+                            }
                         }
                     } catch (Exception ignored) {}
                 }
@@ -593,11 +596,11 @@ public class TradeMarketLogger {
             String foundBase = null;
             String foundFingerprint = null;
 
+            // Pass 1: Find item name and fingerprint
             for (int i = 0; i < items.size(); i++) {
                 ItemStack stack = items.get(i);
                 if (stack == null || stack.isEmpty()) continue;
 
-                // Find the item name and fingerprint (first game item that's not an emerald)
                 if (foundItem == null) {
                     foundBase = ItemNameHelper.extractBaseName(stack);
                     if (foundBase != null) {
@@ -605,26 +608,14 @@ public class TradeMarketLogger {
                         foundFingerprint = buildStatFingerprint(stack);
                     }
                 }
-
-                // Try Wynntils API for price first
-                if (foundPrice < 0) {
-                    try {
-                        TradeMarketPriceInfo priceInfo = Models.TradeMarket.calculateItemPriceInfo(stack);
-                        if (priceInfo != null && priceInfo != TradeMarketPriceInfo.EMPTY && priceInfo.totalPrice() > 0) {
-                            foundPrice = priceInfo.totalPrice();
-                            tmLog("Sell price from Wynntils API (slot {}): {}", i, foundPrice);
-                        }
-                    } catch (Exception ignored) {}
-                }
-
-                // Fallback: parse price from item lore (e.g., "Total: 200" in Set Price slot)
-                if (foundPrice < 0) {
-                    foundPrice = extractPriceFromStack(stack);
-                    if (foundPrice > 0) {
-                        tmLog("Sell price from lore parsing (slot {}): {}", i, foundPrice);
-                    }
-                }
             }
+
+            // Pass 2: Extract price with prioritized patterns.
+            // Don't use calculateItemPriceInfo — it's for search result items, not the sell screen.
+            // Scan explicit "Price:/Total:/Cost:" patterns first across ALL slots,
+            // then "X emeralds", then denomination last — to avoid picking up stray
+            // denomination text (e.g., "1stx" from balance/fee display items).
+            foundPrice = extractPrioritizedPrice(items);
 
             if (foundBase != null) {
                 String cleanName = foundItem != null ? ItemNameHelper.cleanItemName(foundItem) : foundBase;
@@ -796,10 +787,10 @@ public class TradeMarketLogger {
                 if (baseName != null && pendingSells.containsKey(baseName.toLowerCase())) {
                     txType = TransactionRecord.Type.SELL;
                 } else {
-                    // Default to SELL since sells are more commonly async
-                    txType = TransactionRecord.Type.SELL;
-                    tmWarn("Async withdrawal: could not determine type for \"{}\", defaulting to SELL",
-                            itemName);
+                    // Default to BUY: if we're withdrawing an actual item (not emeralds), it's a buy
+                    txType = TransactionRecord.Type.BUY;
+                    tmWarn("Async withdrawal: could not determine type for \"{}\", defaulting to BUY (fulfilledOrderTypes keys={})",
+                            itemName, fulfilledOrderTypes.keySet());
                 }
             }
 
@@ -866,8 +857,9 @@ public class TradeMarketLogger {
     private long extractOrderPrice(ItemStack stack) {
         try {
             List<String> loreLines = getPlainLoreLines(stack);
+
+            // Priority 1: "X x Y" format (most specific to order screens)
             for (String text : loreLines) {
-                // "0 x 810,024²" — the ² is stripped by getString(), leaving "0 x 810,024"
                 Matcher m = ORDER_PRICE_PATTERN.matcher(text);
                 if (m.find()) {
                     long unitPrice = Long.parseLong(m.group(2).replace(",", ""));
@@ -876,8 +868,22 @@ public class TradeMarketLogger {
                         return unitPrice;
                     }
                 }
+            }
 
-                // Also try denomination format from parenthetical "(3stx 5.76¼²)"
+            // Priority 2: Explicit "Price:/Total:/Cost:" pattern
+            for (String text : loreLines) {
+                Matcher m = LORE_PRICE_PATTERN.matcher(text);
+                if (m.find()) return Long.parseLong(m.group(1).replace(",", ""));
+            }
+
+            // Priority 3: "X emeralds" pattern
+            for (String text : loreLines) {
+                Matcher m = LORE_EMERALD_PATTERN.matcher(text);
+                if (m.find()) return Long.parseLong(m.group(1).replace(",", ""));
+            }
+
+            // Priority 4: Denomination format (last resort — prone to false positives)
+            for (String text : loreLines) {
                 long denomTotal = parseDenominations(text);
                 if (denomTotal > 0) {
                     tmLog("Order price from denomination: {}", denomTotal);
@@ -888,8 +894,7 @@ public class TradeMarketLogger {
             tmLog("Order price extraction error: {}", e.getMessage());
         }
 
-        // Fall back to standard price extraction
-        return extractPriceFromStack(stack);
+        return -1;
     }
 
     /**
@@ -956,6 +961,63 @@ public class TradeMarketLogger {
             tmLog("Fingerprint build error: {}", e.getMessage());
         }
         return null;
+    }
+
+    /**
+     * Extract price from a list of items using prioritized pattern matching.
+     * Scans ALL items for explicit "Price:/Total:/Cost:" first, then "X emeralds",
+     * then denomination format last — to avoid picking up stray denomination text
+     * (e.g., "1stx" from balance/fee display items) before the real price slot.
+     */
+    private long extractPrioritizedPrice(List<ItemStack> items) {
+        long priceResult = -1;
+        long emeraldResult = -1;
+        long denomResult = -1;
+
+        for (int i = 0; i < items.size(); i++) {
+            ItemStack stack = items.get(i);
+            if (stack == null || stack.isEmpty()) continue;
+
+            try {
+                Minecraft mc = Minecraft.getInstance();
+                net.minecraft.world.item.Item.TooltipContext ctx;
+                if (mc.level != null) {
+                    ctx = net.minecraft.world.item.Item.TooltipContext.of(mc.level);
+                } else {
+                    ctx = net.minecraft.world.item.Item.TooltipContext.EMPTY;
+                }
+                List<Component> lore = stack.getTooltipLines(ctx, mc.player,
+                        net.minecraft.world.item.TooltipFlag.NORMAL);
+                if (lore == null) continue;
+
+                for (Component line : lore) {
+                    String text = line.getString();
+                    if (text == null || text.isEmpty()) continue;
+
+                    if (priceResult < 0) {
+                        Matcher m = LORE_PRICE_PATTERN.matcher(text);
+                        if (m.find()) {
+                            priceResult = Long.parseLong(m.group(1).replace(",", ""));
+                            tmLog("Sell price from explicit pattern (slot {}): {}", i, priceResult);
+                        }
+                    }
+                    if (emeraldResult < 0) {
+                        Matcher m = LORE_EMERALD_PATTERN.matcher(text);
+                        if (m.find()) {
+                            emeraldResult = Long.parseLong(m.group(1).replace(",", ""));
+                        }
+                    }
+                    if (denomResult < 0) {
+                        long d = parseDenominations(text);
+                        if (d > 0) denomResult = d;
+                    }
+                }
+            } catch (Exception ignored) {}
+        }
+
+        if (priceResult > 0) return priceResult;
+        if (emeraldResult > 0) return emeraldResult;
+        return denomResult;
     }
 
     /**
