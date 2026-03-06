@@ -199,7 +199,7 @@ public class TransactionHistoryScreen extends Screen {
 
             // Name filter
             if (!nameSearch.isEmpty() &&
-                    !r.itemName.toLowerCase().contains(nameSearch.toLowerCase())) return true;
+                    (r.itemName == null || !r.itemName.toLowerCase().contains(nameSearch.toLowerCase()))) return true;
 
             return false;
         });
@@ -207,7 +207,7 @@ public class TransactionHistoryScreen extends Screen {
         // Sort
         Comparator<TransactionRecord> cmp = switch (currentSort) {
             case DATE -> Comparator.comparingLong(r -> r.timestamp);
-            case NAME -> Comparator.comparing(r -> r.itemName, String.CASE_INSENSITIVE_ORDER);
+            case NAME -> Comparator.comparing(r -> r.itemName != null ? r.itemName : "", String.CASE_INSENSITIVE_ORDER);
             case PRICE -> Comparator.comparingLong(r -> r.priceEmeralds);
         };
 

@@ -112,12 +112,13 @@ public class TransactionListWidget extends AbstractSelectionList<TransactionList
             guiGraphics.drawString(mc.font, typeStr, left + 88, textY, typeColor);
 
             // Item name
+            String safeName = record.itemName != null ? record.itemName : "Unknown";
             String itemStr = record.quantity > 1
-                    ? record.quantity + "x " + record.itemName
-                    : record.itemName;
-            int maxNameWidth = width - 240;
+                    ? record.quantity + "x " + safeName
+                    : safeName;
+            int maxNameWidth = Math.max(20, width - 240);
             if (mc.font.width(itemStr) > maxNameWidth) {
-                itemStr = mc.font.plainSubstrByWidth(itemStr, maxNameWidth - mc.font.width("...")) + "...";
+                itemStr = mc.font.plainSubstrByWidth(itemStr, Math.max(0, maxNameWidth - mc.font.width("..."))) + "...";
             }
             guiGraphics.drawString(mc.font, itemStr, left + 128, textY, COLOR_NAME);
 
@@ -193,9 +194,10 @@ public class TransactionListWidget extends AbstractSelectionList<TransactionList
             long displayTs = pair.sell != null ? pair.sell.timestamp : pair.buy.timestamp;
             this.dateStr = DATE_FORMAT.format(Instant.ofEpochMilli(displayTs));
 
+            String buyName = pair.buy.itemName != null ? pair.buy.itemName : "Unknown";
             this.itemName = pair.buy.quantity > 1
-                    ? pair.buy.quantity + "x " + pair.buy.itemName
-                    : pair.buy.itemName;
+                    ? pair.buy.quantity + "x " + buyName
+                    : buyName;
 
             this.buyPriceStr = Entry.formatPrice(pair.buy.priceEmeralds);
 
@@ -233,10 +235,10 @@ public class TransactionListWidget extends AbstractSelectionList<TransactionList
 
             // Item name
             int nameX = left + 74;
-            int maxNameWidth = width - 280;
+            int maxNameWidth = Math.max(20, width - 280);
             String displayName = itemName;
             if (mc.font.width(displayName) > maxNameWidth) {
-                displayName = mc.font.plainSubstrByWidth(displayName, maxNameWidth - mc.font.width("...")) + "...";
+                displayName = mc.font.plainSubstrByWidth(displayName, Math.max(0, maxNameWidth - mc.font.width("..."))) + "...";
             }
             guiGraphics.drawString(mc.font, displayName, nameX, textY, COLOR_NAME);
 

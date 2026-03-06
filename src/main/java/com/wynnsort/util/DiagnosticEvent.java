@@ -33,7 +33,7 @@ public class DiagnosticEvent {
             if (sb.length() > 0) sb.append(", ");
             sb.append(entry.getKey()).append("=").append(entry.getValue());
             if (sb.length() > maxLength) {
-                sb.setLength(maxLength - 3);
+                sb.setLength(Math.max(0, maxLength - 3));
                 sb.append("...");
                 break;
             }

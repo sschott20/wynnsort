@@ -2,6 +2,7 @@ package com.wynnsort.history;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonSyntaxException;
 import com.google.gson.reflect.TypeToken;
 import com.wynnsort.WynnSortMod;
 import net.fabricmc.loader.api.FabricLoader;
@@ -50,6 +51,9 @@ public class TransactionStore {
                     transactions.addAll(loaded);
                     WynnSortMod.log("Loaded {} transactions from {}", transactions.size(), STORE_PATH);
                 }
+            } catch (JsonSyntaxException e) {
+                WynnSortMod.logWarn("Corrupt JSON in transactions file, starting fresh: {}", e.getMessage());
+                transactions.clear();
             } catch (IOException e) {
                 WynnSortMod.logError("Failed to load transactions", e);
             }
