@@ -22,8 +22,10 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.ItemStack;
 import net.neoforged.bus.api.SubscribeEvent;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * Single tooltip handler for all WynnSort tooltip additions (score + market price).
@@ -37,6 +39,8 @@ public class TooltipFeature {
     private static final FeatureLogger LOG = new FeatureLogger("Tooltip", DiagnosticLog.Category.TOOLTIP);
     private boolean firstTooltipLogged = false;
     private boolean scoreComputationBroken = false;
+    /** Tracks item names that have already logged a NaN/skip warning this session. */
+    private final Set<String> nanWarnedItems = new HashSet<>();
 
     private TooltipFeature() {}
 
@@ -77,7 +81,10 @@ public class TooltipFeature {
 
             ScoreResult result = computeScore(gearItem, gearInstance, filters);
             if (result == null) {
-                LOG.warn("Score NaN/negative for item={}", gearItem.getItemInfo().name());
+                String itemName = gearItem.getItemInfo().name();
+                if (nanWarnedItems.add(itemName)) {
+                    LOG.warn("Score NaN/negative for item={} (further warnings for this item suppressed)", itemName);
+                }
                 return false;
             }
 
@@ -173,7 +180,7 @@ public class TooltipFeature {
 
     private ScoreResult computeScore(GearItem gearItem, GearInstance gearInstance, List<StatFilter> filters) {
         float pct = ScoreComputation.computeScore(gearItem, gearInstance, filters);
-        if (Float.isNaN(pct) || pct < 0.0f) return null;
+        if (Float.isNaN(pct)) return null;
         String label = SortState.isOverall() ? "overall"
                 : SortState.isFilterMode() ? "filtered avg"
                 : filters.get(0).statPattern();

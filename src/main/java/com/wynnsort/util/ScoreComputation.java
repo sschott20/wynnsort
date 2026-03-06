@@ -23,6 +23,11 @@ public final class ScoreComputation {
     public static float computeScore(GearItem gearItem, GearInstance gearInstance,
                                      List<StatFilter> filters) {
         if (SortState.isOverall()) {
+            // Items with no rollable stats return 0% from getOverallPercentage(),
+            // which is misleading. Return NaN to indicate "not applicable".
+            if (gearInstance.identifications() == null || gearInstance.identifications().isEmpty()) {
+                return Float.NaN;
+            }
             if (WynnSortConfig.INSTANCE.useWeightedScale) {
                 float weighted = getWeightedScore(gearItem);
                 if (!Float.isNaN(weighted) && weighted > 0.0f) return weighted;
