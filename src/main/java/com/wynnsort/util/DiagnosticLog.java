@@ -35,7 +35,7 @@ public final class DiagnosticLog {
 
     private static final Path DIAGNOSTICS_DIR = FabricLoader.getInstance().getConfigDir().resolve("wynnsort");
     private static final Path DIAGNOSTICS_PATH = DIAGNOSTICS_DIR.resolve("diagnostics.jsonl");
-    private static final Path DIAGNOSTICS_OLD_PATH = DIAGNOSTICS_DIR.resolve("diagnostics.jsonl.old");
+    private static final int MAX_ARCHIVE_FILES = 5;
 
     private static final Gson GSON = new GsonBuilder().create();
 
@@ -91,10 +91,12 @@ public final class DiagnosticLog {
 
         lock.lock();
         try {
-            // Write to ring buffer
-            buffer[writeIndex] = evt;
-            writeIndex = (writeIndex + 1) % RING_BUFFER_SIZE;
-            if (count < RING_BUFFER_SIZE) count++;
+            // Skip ring buffer for high-volume categories (file-only)
+            if (category != Category.OVERLAY) {
+                buffer[writeIndex] = evt;
+                writeIndex = (writeIndex + 1) % RING_BUFFER_SIZE;
+                if (count < RING_BUFFER_SIZE) count++;
+            }
 
             // Write to file
             writeToFile(evt);
@@ -215,8 +217,21 @@ public final class DiagnosticLog {
     private static void rotateIfNeeded() throws IOException {
         if (!Files.exists(DIAGNOSTICS_PATH)) return;
         if (Files.size(DIAGNOSTICS_PATH) > MAX_FILE_SIZE) {
-            Files.deleteIfExists(DIAGNOSTICS_OLD_PATH);
-            Files.move(DIAGNOSTICS_PATH, DIAGNOSTICS_OLD_PATH);
+            // Delete oldest archive
+            Path oldest = DIAGNOSTICS_DIR.resolve("diagnostics." + MAX_ARCHIVE_FILES + ".jsonl");
+            Files.deleteIfExists(oldest);
+
+            // Shift existing archives up by 1
+            for (int i = MAX_ARCHIVE_FILES - 1; i >= 1; i--) {
+                Path src = DIAGNOSTICS_DIR.resolve("diagnostics." + i + ".jsonl");
+                Path dst = DIAGNOSTICS_DIR.resolve("diagnostics." + (i + 1) + ".jsonl");
+                if (Files.exists(src)) {
+                    Files.move(src, dst);
+                }
+            }
+
+            // Move current to .1
+            Files.move(DIAGNOSTICS_PATH, DIAGNOSTICS_DIR.resolve("diagnostics.1.jsonl"));
         }
     }
 }
