@@ -55,9 +55,7 @@ public abstract class TradeMarketScreenMixin extends Screen {
 
     @Inject(method = "doInit", at = @At("RETURN"), remap = false)
     private void wynnsort$onDoInitReturn(CallbackInfo ci) {
-        WynnSortMod.log("[WynnSort DEBUG] doInit mixin fired! Adding sort UI.");
         if (!WynnSortConfig.INSTANCE.sortButtonEnabled) {
-            WynnSortMod.log("[WynnSort DEBUG] Sort button disabled in config, skipping.");
             return;
         }
 
