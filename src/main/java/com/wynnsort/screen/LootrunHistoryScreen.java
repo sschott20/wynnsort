@@ -24,8 +24,6 @@ public class LootrunHistoryScreen extends Screen {
     private static final int COLOR_HEADER = 0xFFFFAA00;
     private static final int COLOR_STAT_LABEL = 0xFFAAAAAA;
     private static final int COLOR_STAT_VALUE = 0xFFFFFFFF;
-    private static final int COLOR_COMPLETED = 0xFF55FF55;
-    private static final int COLOR_FAILED = 0xFFFF5555;
 
     private RunListWidget runList;
     private LootrunStore.LifetimeStats lifetimeStats;
@@ -73,16 +71,18 @@ public class LootrunHistoryScreen extends Screen {
         int headerY = 42;
         int left = 20;
         guiGraphics.drawString(this.font, "Date", left, headerY, COLOR_HEADER);
-        guiGraphics.drawString(this.font, "Chall", left + 72, headerY, COLOR_HEADER);
-        guiGraphics.drawString(this.font, "Pulls", left + 112, headerY, COLOR_HEADER);
-        guiGraphics.drawString(this.font, "Rerolls", left + 152, headerY, COLOR_HEADER);
-        guiGraphics.drawString(this.font, "Sacr", left + 204, headerY, COLOR_HEADER);
-        guiGraphics.drawString(this.font, "XP", left + 244, headerY, COLOR_HEADER);
-        guiGraphics.drawString(this.font, "Time", left + 294, headerY, COLOR_HEADER);
+        guiGraphics.drawString(this.font, "Location", left + 72, headerY, COLOR_HEADER);
+        guiGraphics.drawString(this.font, "Chall", left + 172, headerY, COLOR_HEADER);
+        guiGraphics.drawString(this.font, "Pulls", left + 208, headerY, COLOR_HEADER);
+        guiGraphics.drawString(this.font, "Rerolls", left + 248, headerY, COLOR_HEADER);
 
-        String outcomeStr = "Result";
-        int outcomeWidth = this.font.width(outcomeStr);
-        guiGraphics.drawString(this.font, outcomeStr, this.width - 30 - outcomeWidth, headerY, COLOR_HEADER);
+        // Right-aligned columns
+        String chestsStr = "Chests";
+        String itemsStr = "Items";
+        String timeStr = "Time";
+        guiGraphics.drawString(this.font, chestsStr, this.width - 30 - this.font.width("00:00") - 10 - this.font.width("000") - 10 - this.font.width("000"), headerY, COLOR_HEADER);
+        guiGraphics.drawString(this.font, itemsStr, this.width - 30 - this.font.width("00:00") - 10 - this.font.width("000"), headerY, COLOR_HEADER);
+        guiGraphics.drawString(this.font, timeStr, this.width - 30 - this.font.width("00:00"), headerY, COLOR_HEADER);
     }
 
     private void renderStatsBar(GuiGraphics guiGraphics) {
@@ -95,13 +95,6 @@ public class LootrunHistoryScreen extends Screen {
 
         // Total runs
         x = drawStat(guiGraphics, "Runs: ", String.valueOf(lifetimeStats.totalRuns), x, y, COLOR_STAT_LABEL, COLOR_STAT_VALUE);
-        x += 10;
-
-        // Completion rate
-        String rateStr = String.format("%.0f%%", lifetimeStats.completionRate);
-        int rateColor = lifetimeStats.completionRate >= 80 ? COLOR_COMPLETED :
-                        lifetimeStats.completionRate >= 50 ? 0xFFFFAA00 : COLOR_FAILED;
-        x = drawStat(guiGraphics, "Rate: ", rateStr, x, y, COLOR_STAT_LABEL, rateColor);
         x += 10;
 
         // Avg pulls/run
@@ -118,9 +111,12 @@ public class LootrunHistoryScreen extends Screen {
         x = drawStat(guiGraphics, "Total Pulls: ", String.valueOf(lifetimeStats.totalPulls), x, y, COLOR_STAT_LABEL, COLOR_STAT_VALUE);
         x += 10;
 
-        // Total XP
-        String xpStr = formatXp(lifetimeStats.totalXp);
-        drawStat(guiGraphics, "Total XP: ", xpStr, x, y, COLOR_STAT_LABEL, COLOR_STAT_VALUE);
+        // Total reward chests
+        x = drawStat(guiGraphics, "Chests: ", String.valueOf(lifetimeStats.totalRewardChests), x, y, COLOR_STAT_LABEL, COLOR_STAT_VALUE);
+        x += 10;
+
+        // Total items looted
+        drawStat(guiGraphics, "Items: ", String.valueOf(lifetimeStats.totalItemsLooted), x, y, COLOR_STAT_LABEL, COLOR_STAT_VALUE);
     }
 
     private int drawStat(GuiGraphics guiGraphics, String label, String value, int x, int y, int labelColor, int valueColor) {
@@ -128,15 +124,6 @@ public class LootrunHistoryScreen extends Screen {
         int labelWidth = this.font.width(label);
         guiGraphics.drawString(this.font, value, x + labelWidth, y, valueColor);
         return x + labelWidth + this.font.width(value);
-    }
-
-    private static String formatXp(long xp) {
-        if (xp >= 1_000_000) {
-            return String.format("%.1fM", xp / 1_000_000.0);
-        } else if (xp >= 1_000) {
-            return String.format("%.1fK", xp / 1_000.0);
-        }
-        return String.valueOf(xp);
     }
 
     @Override
@@ -185,31 +172,28 @@ public class LootrunHistoryScreen extends Screen {
 
             private static final int COLOR_DATE = 0xFFAAAAAA;
             private static final int COLOR_VALUE = 0xFFFFFFFF;
-            private static final int COLOR_COMPLETED = 0xFF55FF55;
-            private static final int COLOR_FAILED = 0xFFFF5555;
+            private static final int COLOR_LOCATION = 0xFF88BBFF;
 
             private final LootrunRecord record;
             private final String dateStr;
+            private final String locationStr;
             private final String challengesStr;
             private final String pullsStr;
             private final String rerollsStr;
-            private final String sacrificesStr;
-            private final String xpStr;
+            private final String chestsStr;
+            private final String itemsStr;
             private final String timeStr;
-            private final String outcomeStr;
-            private final int outcomeColor;
 
             public RunEntry(LootrunRecord record) {
                 this.record = record;
                 this.dateStr = DATE_FORMAT.format(Instant.ofEpochMilli(record.endTime));
+                this.locationStr = record.location != null ? record.location : "";
                 this.challengesStr = String.valueOf(record.challengesCompleted);
                 this.pullsStr = String.valueOf(record.pullsEarned);
                 this.rerollsStr = String.valueOf(record.rerollsEarned);
-                this.sacrificesStr = String.valueOf(record.sacrifices);
-                this.xpStr = formatXp(record.xpEarned);
+                this.chestsStr = String.valueOf(record.rewardChestsOpened);
+                this.itemsStr = record.itemsLooted > 0 ? String.valueOf(record.itemsLooted) : "-";
                 this.timeStr = formatDuration(record.getDurationSeconds());
-                this.outcomeStr = record.completed ? "OK" : "FAIL";
-                this.outcomeColor = record.completed ? COLOR_COMPLETED : COLOR_FAILED;
             }
 
             @Override
@@ -221,27 +205,30 @@ public class LootrunHistoryScreen extends Screen {
                 // Date
                 guiGraphics.drawString(mc.font, dateStr, left + 2, textY, COLOR_DATE);
 
+                // Location
+                guiGraphics.drawString(mc.font, locationStr, left + 72, textY, COLOR_LOCATION);
+
                 // Challenges
-                guiGraphics.drawString(mc.font, challengesStr, left + 72, textY, COLOR_VALUE);
+                guiGraphics.drawString(mc.font, challengesStr, left + 172, textY, COLOR_VALUE);
 
                 // Pulls
-                guiGraphics.drawString(mc.font, pullsStr, left + 112, textY, COLOR_VALUE);
+                guiGraphics.drawString(mc.font, pullsStr, left + 208, textY, COLOR_VALUE);
 
                 // Rerolls
-                guiGraphics.drawString(mc.font, rerollsStr, left + 152, textY, COLOR_VALUE);
+                guiGraphics.drawString(mc.font, rerollsStr, left + 248, textY, COLOR_VALUE);
 
-                // Sacrifices
-                guiGraphics.drawString(mc.font, sacrificesStr, left + 204, textY, COLOR_VALUE);
+                // Right-aligned: Chests, Items, Time
+                int timeWidth = mc.font.width(timeStr);
+                int timeX = left + width - timeWidth - 4;
+                guiGraphics.drawString(mc.font, timeStr, timeX, textY, COLOR_VALUE);
 
-                // XP
-                guiGraphics.drawString(mc.font, xpStr, left + 244, textY, COLOR_VALUE);
+                int itemsWidth = mc.font.width(itemsStr);
+                int itemsX = timeX - itemsWidth - 10;
+                guiGraphics.drawString(mc.font, itemsStr, itemsX, textY, COLOR_VALUE);
 
-                // Duration
-                guiGraphics.drawString(mc.font, timeStr, left + 294, textY, COLOR_VALUE);
-
-                // Outcome (right-aligned)
-                int outcomeWidth = mc.font.width(outcomeStr);
-                guiGraphics.drawString(mc.font, outcomeStr, left + width - outcomeWidth - 4, textY, outcomeColor);
+                int chestsWidth = mc.font.width(chestsStr);
+                int chestsX = itemsX - chestsWidth - 10;
+                guiGraphics.drawString(mc.font, chestsStr, chestsX, textY, COLOR_VALUE);
 
                 // Hover highlight
                 if (isMouseOver) {

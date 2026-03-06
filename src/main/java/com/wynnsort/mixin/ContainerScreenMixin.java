@@ -51,7 +51,9 @@ public abstract class ContainerScreenMixin extends Screen {
     @Unique private final List<String> wynnsort$statNames = new ArrayList<>();
     @Unique private boolean wynnsort$statsBuilt = false;
     @Unique private String wynnsort$lastContainerTitle = null;
-    @Unique private static final int WYNNSORT$MAX_STAT_ROWS = 12;
+    @Unique private static final int WYNNSORT$ROWS_PER_COL = 12;
+    @Unique private static final int WYNNSORT$MAX_STAT_ROWS = WYNNSORT$ROWS_PER_COL * 2;
+    @Unique private static final int WYNNSORT$COL_WIDTH = 130;
 
     // Preset buttons
     @Unique private static final int WYNNSORT$PRESET_COUNT = 5;
@@ -279,6 +281,8 @@ public abstract class ContainerScreenMixin extends Screen {
         String target = text.toLowerCase().trim();
         AbstractContainerScreen<?> screen = (AbstractContainerScreen<?>) (Object) this;
         for (Slot slot : screen.getMenu().slots) {
+            // Skip player inventory slots
+            if (slot.container instanceof net.minecraft.world.entity.player.Inventory) continue;
             ItemStack stack = slot.getItem();
             if (stack.isEmpty()) continue;
             try {
@@ -312,15 +316,26 @@ public abstract class ContainerScreenMixin extends Screen {
         if (wynnsort$statsBuilt) return;
         if (!WynnSortConfig.INSTANCE.overlayEnabled) return;
         AbstractContainerScreen<?> screen = (AbstractContainerScreen<?>) (Object) this;
-        List<String> stats = StatPickerHelper.getAvailableStats(screen);
+
+        // Try to get the trade market search query for smarter filtering
+        String searchQuery = null;
+        try {
+            searchQuery = Models.TradeMarket.getLastSearchFilter();
+        } catch (Exception ignored) {}
+
+        List<String> stats = StatPickerHelper.getAvailableStats(screen, searchQuery);
         if (stats.isEmpty()) return;
         wynnsort$statsBuilt = true;
         wynnsort$statNames.addAll(stats);
         int x = leftPos + imageWidth + 8;
         int baseY = WynnSortConfig.INSTANCE.searchPresetsEnabled ? topPos + 76 : topPos + 40;
         int maxRows = Math.min(stats.size(), WYNNSORT$MAX_STAT_ROWS);
+        int rowsPerCol = WYNNSORT$ROWS_PER_COL;
         for (int i = 0; i < maxRows; i++) {
-            EditBox box = new EditBox(this.font, x + 90, baseY + i * 16, 30, 14, Component.literal(stats.get(i)));
+            int col = i / rowsPerCol;
+            int row = i % rowsPerCol;
+            int colX = x + col * WYNNSORT$COL_WIDTH;
+            EditBox box = new EditBox(this.font, colX + 90, baseY + row * 16, 30, 14, Component.literal(stats.get(i)));
             box.setMaxLength(3);
             box.setHint(Component.literal("%"));
             box.setResponder(text -> wynnsort$syncFiltersFromBoxes());
@@ -380,13 +395,17 @@ public abstract class ContainerScreenMixin extends Screen {
             int x = leftPos + imageWidth + 8;
             int baseY = WynnSortConfig.INSTANCE.searchPresetsEnabled ? topPos + 76 : topPos + 40;
             int maxRows = Math.min(wynnsort$statNames.size(), wynnsort$statBoxes.size());
+            int rowsPerCol = WYNNSORT$ROWS_PER_COL;
             for (int i = 0; i < maxRows; i++) {
+                int col = i / rowsPerCol;
+                int row = i % rowsPerCol;
+                int colX = x + col * WYNNSORT$COL_WIDTH;
                 String name = wynnsort$statNames.get(i);
                 if (this.font.width(name) > 85) {
                     while (this.font.width(name + "..") > 85 && name.length() > 1) name = name.substring(0, name.length() - 1);
                     name = name + "..";
                 }
-                guiGraphics.drawString(this.font, name, x, baseY + i * 16 + 3, 0xFFCCCCCC);
+                guiGraphics.drawString(this.font, name, colX, baseY + row * 16 + 3, 0xFFCCCCCC);
             }
         }
         if (WynnSortConfig.INSTANCE.searchPresetsEnabled) {

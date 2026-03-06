@@ -3,7 +3,6 @@ package com.wynnsort.lootrun;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.reflect.TypeToken;
-import com.wynnsort.WynnSortMod;
 import com.wynnsort.util.DiagnosticLog;
 import com.wynnsort.util.FeatureLogger;
 import net.fabricmc.loader.api.FabricLoader;
@@ -70,8 +69,9 @@ public class LootrunStore {
             records.remove(0);
         }
         dirty.set(true);
-        LOG.info("Logged lootrun: completed={}, challenges={}, pulls={}, xp={}",
-                record.completed, record.challengesCompleted, record.pullsEarned, record.xpEarned);
+        LOG.info("Logged lootrun: completed={}, challenges={}, pulls={}, location={}, rewardChests={}, items={}",
+                record.completed, record.challengesCompleted, record.pullsEarned,
+                record.location, record.rewardChestsOpened, record.itemsLooted);
     }
 
     /**
@@ -92,24 +92,19 @@ public class LootrunStore {
 
         stats.totalRuns = all.size();
         for (LootrunRecord r : all) {
-            if (r.completed) {
-                stats.completedRuns++;
-            } else {
-                stats.failedRuns++;
-            }
             stats.totalPulls += r.pullsEarned * (r.rerollsEarned + 1);
             stats.totalRerolls += r.rerollsEarned;
             stats.totalSacrifices += r.sacrifices;
-            stats.totalXp += r.xpEarned;
             stats.totalChallenges += r.challengesCompleted;
             stats.totalMobsKilled += r.mobsKilled;
             stats.totalChestsOpened += r.chestsOpened;
+            stats.totalRewardChests += r.rewardChestsOpened;
+            stats.totalItemsLooted += r.itemsLooted;
         }
 
         if (stats.totalRuns > 0) {
             stats.avgPullsPerRun = (double) stats.totalPulls / stats.totalRuns;
             stats.avgChallengesPerRun = (double) stats.totalChallenges / stats.totalRuns;
-            stats.completionRate = (double) stats.completedRuns / stats.totalRuns * 100.0;
         }
 
         return stats;
@@ -138,17 +133,15 @@ public class LootrunStore {
      */
     public static class LifetimeStats {
         public int totalRuns;
-        public int completedRuns;
-        public int failedRuns;
         public int totalPulls;
         public int totalRerolls;
         public int totalSacrifices;
-        public long totalXp;
         public int totalChallenges;
         public int totalMobsKilled;
         public int totalChestsOpened;
+        public int totalRewardChests;
+        public int totalItemsLooted;
         public double avgPullsPerRun;
         public double avgChallengesPerRun;
-        public double completionRate;
     }
 }

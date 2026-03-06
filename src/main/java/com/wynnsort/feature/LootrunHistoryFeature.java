@@ -1,6 +1,5 @@
 package com.wynnsort.feature;
 
-import com.wynnsort.WynnSortMod;
 import com.wynnsort.config.WynnSortConfig;
 import com.wynnsort.util.DiagnosticLog;
 import com.wynnsort.util.FeatureLogger;
@@ -23,6 +22,18 @@ public class LootrunHistoryFeature {
 
     private LootrunHistoryFeature() {}
 
+    private void copySessionData(LootrunRecord record) {
+        LootrunSessionData session = LootrunSessionStats.INSTANCE.getCurrentSession();
+        if (session == null) {
+            session = LootrunSessionStats.INSTANCE.getLastSession();
+        }
+        if (session != null) {
+            record.location = session.location;
+            record.rewardChestsOpened = session.rewardChestsOpened;
+            record.itemsLooted = session.itemsLooted;
+        }
+    }
+
     @SubscribeEvent
     public void onLootrunCompleted(LootrunFinishedEvent.Completed event) {
         if (!WynnSortConfig.INSTANCE.lootrunHistoryEnabled) return;
@@ -39,22 +50,26 @@ public class LootrunHistoryFeature {
             record.pullsEarned = event.getRewardPulls();
             record.rerollsEarned = event.getRewardRerolls();
             record.sacrifices = event.getRewardSacrifices();
-            record.xpEarned = event.getExperienceGained();
             record.mobsKilled = event.getMobsKilled();
             record.chestsOpened = event.getChestsOpened();
+            copySessionData(record);
 
             LootrunStore.addRecord(record);
 
-            LOG.info("Lootrun COMPLETED: challenges={}, pulls={}, rerolls={}, sacrifices={}, xp={}, mobs={}, chests={}, time={}s",
+            LOG.info("Lootrun COMPLETED: challenges={}, pulls={}, rerolls={}, sacrifices={}, mobs={}, chests={}, rewardChests={}, items={}, location={}, time={}s",
                     record.challengesCompleted, record.pullsEarned, record.rerollsEarned,
-                    record.sacrifices, record.xpEarned, record.mobsKilled,
-                    record.chestsOpened, event.getTimeElapsed());
+                    record.sacrifices, record.mobsKilled,
+                    record.chestsOpened, record.rewardChestsOpened, record.itemsLooted,
+                    record.location, event.getTimeElapsed());
 
             Map<String, Object> evtData = new LinkedHashMap<>();
             evtData.put("completed", true);
             evtData.put("challenges", record.challengesCompleted);
             evtData.put("pulls", record.pullsEarned);
             evtData.put("rerolls", record.rerollsEarned);
+            evtData.put("location", record.location);
+            evtData.put("rewardChests", record.rewardChestsOpened);
+            evtData.put("items", record.itemsLooted);
             evtData.put("timeSeconds", event.getTimeElapsed());
             LOG.event("run_recorded", evtData);
         } catch (Exception e) {
@@ -78,18 +93,19 @@ public class LootrunHistoryFeature {
             record.pullsEarned = 0;
             record.rerollsEarned = 0;
             record.sacrifices = 0;
-            record.xpEarned = 0;
             record.mobsKilled = 0;
             record.chestsOpened = 0;
+            copySessionData(record);
 
             LootrunStore.addRecord(record);
 
-            LOG.info("Lootrun FAILED: challenges={}, time={}s",
-                    record.challengesCompleted, event.getTimeElapsed());
+            LOG.info("Lootrun FAILED: challenges={}, location={}, time={}s",
+                    record.challengesCompleted, record.location, event.getTimeElapsed());
 
             Map<String, Object> evtData = new LinkedHashMap<>();
             evtData.put("completed", false);
             evtData.put("challenges", record.challengesCompleted);
+            evtData.put("location", record.location);
             evtData.put("timeSeconds", event.getTimeElapsed());
             LOG.event("run_recorded", evtData);
         } catch (Exception e) {

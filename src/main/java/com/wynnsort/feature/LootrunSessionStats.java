@@ -1,10 +1,11 @@
 package com.wynnsort.feature;
 
-import com.wynnsort.WynnSortMod;
 import com.wynnsort.config.WynnSortConfig;
 import com.wynnsort.util.DiagnosticLog;
 import com.wynnsort.util.FeatureLogger;
 import com.wynntils.core.components.Models;
+import com.wynntils.mc.event.ContainerSetContentEvent;
+import com.wynntils.models.containers.Container;
 import com.wynntils.models.lootrun.beacons.LootrunBeaconKind;
 import com.wynntils.models.lootrun.event.LootrunFinishedEvent;
 import com.wynntils.models.lootrun.type.LootrunningState;
@@ -13,9 +14,11 @@ import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.world.item.ItemStack;
 import net.neoforged.bus.api.SubscribeEvent;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -69,8 +72,51 @@ public class LootrunSessionStats implements HudRenderCallback {
      */
     private int pendingAquaMultiplier = 1;
 
+    /** Whether the lootrun location helper is available. */
+    private static boolean locationHelperAvailable = false;
+    private static boolean locationHelperChecked = false;
+
+    /** Throttle location lookups to once per second (reflection-based, avoid per-frame). */
+    private long lastLocationAttemptMs = 0;
+    private static final long LOCATION_ATTEMPT_INTERVAL_MS = 1000;
+
+    /** Last reward chest container ID we counted, to avoid double-counting from repeated events. */
+    private int lastRewardChestContainerId = -1;
 
     private LootrunSessionStats() {}
+
+    /**
+     * Checks if the current container is a lootrun reward chest.
+     * Shared by DryStreakTracker and LootrunSessionStats to avoid duplication.
+     */
+    static boolean isCurrentContainerRewardChest() {
+        try {
+            Container container = Models.Container.getCurrentContainer();
+            if (container == null) return false;
+            String className = container.getClass().getSimpleName();
+            String containerName = container.getContainerName();
+            return className.contains("LootrunRewardChest")
+                    || (containerName != null && containerName.toLowerCase().contains("lootrun reward"));
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /**
+     * Returns the currently active session data, or null if no lootrun is active.
+     */
+    public LootrunSessionData getCurrentSession() {
+        return currentSession;
+    }
+
+    /**
+     * Returns the most recently completed/failed session data, or null if none.
+     * Used by LootrunHistoryFeature to capture session-tracked data (location, chests, items)
+     * after this handler has already moved currentSession to lastSession.
+     */
+    public LootrunSessionData getLastSession() {
+        return lastSession;
+    }
 
     // ── Wynntils Event Subscriptions ─────────────────────────────────────
 
@@ -94,7 +140,6 @@ public class LootrunSessionStats implements HudRenderCallback {
                 currentSession.sacrifices = event.getRewardSacrifices();
                 currentSession.mobsKilled = event.getMobsKilled();
                 currentSession.chestsOpened = event.getChestsOpened();
-                currentSession.xpEarned = event.getExperienceGained();
 
                 lastSession = currentSession;
                 lastSessionEndTime = System.currentTimeMillis();
@@ -171,7 +216,13 @@ public class LootrunSessionStats implements HudRenderCallback {
             lastRerolls = 0;
             lastSacrifices = 0;
             pendingAquaMultiplier = 1;
+            lastRewardChestContainerId = -1;
             LOG.event("session_started", Map.of("state", currentState.name()));
+        }
+
+        // Try to capture location if not yet determined (may be populated after first challenge)
+        if (currentState.isRunning() && currentSession != null && currentSession.location == null) {
+            tryCaptureLootrunLocation();
         }
 
         // Detect lootrun end (backup in case events don't fire)
@@ -315,6 +366,91 @@ public class LootrunSessionStats implements HudRenderCallback {
         }
     }
 
+    // ── Location Capture ───────────────────────────────────────────────
+
+    /**
+     * Attempts to determine the current lootrun location via the isolated helper.
+     */
+    private void tryCaptureLootrunLocation() {
+        long now = System.currentTimeMillis();
+        if (now - lastLocationAttemptMs < LOCATION_ATTEMPT_INTERVAL_MS) return;
+        lastLocationAttemptMs = now;
+
+        if (!locationHelperChecked) {
+            locationHelperChecked = true;
+            try {
+                com.wynnsort.util.LootrunLocationHelper.getCurrentLocationName();
+                locationHelperAvailable = true;
+                LOG.info("LootrunLocationHelper available");
+            } catch (Throwable t) {
+                locationHelperAvailable = false;
+                LOG.info("LootrunLocationHelper not available: {}", t.getMessage());
+            }
+        }
+        if (!locationHelperAvailable) return;
+
+        try {
+            String loc = com.wynnsort.util.LootrunLocationHelper.getCurrentLocationName();
+            if (loc != null && currentSession != null) {
+                currentSession.location = loc;
+                LOG.info("Captured lootrun location: {}", loc);
+            }
+        } catch (Throwable t) {
+            LOG.warn("Failed to capture lootrun location: {}", t.getMessage());
+        }
+    }
+
+    // ── Reward Chest Tracking ───────────────────────────────────────────
+
+    /**
+     * Detects reward chest containers during active lootruns and counts
+     * chests opened and items obtained.
+     */
+    @SubscribeEvent
+    public void onContainerContent(ContainerSetContentEvent.Post event) {
+        if (currentSession == null) return;
+
+        // Only track during active lootruns
+        LootrunningState state;
+        try {
+            state = Models.Lootrun.getState();
+        } catch (Exception e) {
+            return;
+        }
+        if (!state.isRunning()) return;
+
+        if (!isCurrentContainerRewardChest()) return;
+
+        // Get container ID for deduplication
+        int containerId = -1;
+        try {
+            Container container = Models.Container.getCurrentContainer();
+            if (container != null) containerId = container.getContainerId();
+        } catch (Exception e) { /* ignore */ }
+
+        // Deduplicate: ContainerSetContentEvent can fire multiple times for the same chest
+        if (containerId >= 0 && containerId == lastRewardChestContainerId) return;
+        lastRewardChestContainerId = containerId;
+
+        // Count the reward chest
+        currentSession.rewardChestsOpened++;
+
+        // Count items in the chest (respecting stack sizes for emeralds, materials, etc.)
+        List<ItemStack> items = event.getItems();
+        int itemCount = 0;
+        if (items != null) {
+            for (ItemStack stack : items) {
+                if (stack != null && !stack.isEmpty()) {
+                    itemCount += stack.getCount();
+                }
+            }
+        }
+        currentSession.itemsLooted += itemCount;
+
+        LOG.info("Reward chest opened (#{}) with {} items (total items: {})",
+                currentSession.rewardChestsOpened, itemCount, currentSession.itemsLooted);
+    }
+
     // ── HUD Rendering ────────────────────────────────────────────────────
 
     /**
@@ -338,6 +474,7 @@ public class LootrunSessionStats implements HudRenderCallback {
         int lineCount = 1; // header always shown
         if (cfg.showStatsChallenges) lineCount++;
         if (cfg.showStatsPullsRerolls) lineCount++;
+        if (session.itemsLooted > 0) lineCount++;
         if (cfg.showStatsMythicChance && session.getEffectivePulls() > 0) lineCount++;
         if (cfg.showStatsSacrifices && session.sacrifices > 0) lineCount++;
         if (cfg.showStatsBeaconSummary && !session.beaconCounts.isEmpty()) lineCount++;
@@ -389,6 +526,13 @@ public class LootrunSessionStats implements HudRenderCallback {
                 pullsText += " (" + effectivePulls + " eff.)";
             }
             guiGraphics.drawString(mc.font, pullsText, x + padding, textY, COLOR_LABEL);
+            textY += lineHeight;
+        }
+
+        // Items looted from reward chests
+        if (session.itemsLooted > 0) {
+            String itemsText = "Items looted: " + session.itemsLooted;
+            guiGraphics.drawString(mc.font, itemsText, x + padding, textY, COLOR_LABEL);
             textY += lineHeight;
         }
 

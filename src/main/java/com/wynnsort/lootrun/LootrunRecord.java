@@ -16,14 +16,18 @@ public class LootrunRecord {
     public int pullsEarned;
     public int rerollsEarned;
     public int sacrifices;
-    /** XP earned (from Wynntils experienceGained, which is an int) */
-    public long xpEarned;
     public int mobsKilled;
     public int chestsOpened;
     /** Beacon type name -> count of times selected */
     public Map<String, Integer> beaconCounts;
     /** Number of vibrant (rainbow-boosted) beacons selected */
     public int vibrantBeacons;
+    /** Lootrun location name (e.g. "Silent Expanse"), null if unknown */
+    public String location;
+    /** Number of reward chests opened during the lootrun */
+    public int rewardChestsOpened;
+    /** Total items looted from reward chests (counts stack sizes for stackable items). */
+    public int itemsLooted;
 
     public LootrunRecord() {
         this.beaconCounts = new HashMap<>();

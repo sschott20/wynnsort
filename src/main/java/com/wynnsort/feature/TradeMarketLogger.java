@@ -2,6 +2,7 @@ package com.wynnsort.feature;
 
 import com.wynnsort.WynnSortMod;
 import com.wynnsort.config.WynnSortConfig;
+import com.wynnsort.mixin.TradeMarketScreenMixin;
 import com.wynnsort.util.ItemNameHelper;
 import com.wynnsort.history.TransactionRecord;
 import com.wynnsort.history.TransactionStore;
@@ -69,6 +70,9 @@ public class TradeMarketLogger {
     // Wynntils denomination format: Xstx Yle Zeb We
     private static final Pattern DENOM_PATTERN = Pattern.compile(
             "(\\d+)\\s*(stx|le|eb|e)\\b", Pattern.CASE_INSENSITIVE);
+    // VIEWING_ORDER price format: "0 x 810,024²" — quantity x unit_price (² = emerald symbol)
+    private static final Pattern ORDER_PRICE_PATTERN = Pattern.compile(
+            "(\\d+)\\s+x\\s+([\\d,]+)");
 
     private static final long STX_MULT = 262144L;
     private static final long LE_MULT = 4096L;
@@ -96,6 +100,20 @@ public class TradeMarketLogger {
     // Pending fingerprint data for buy/sell context
     private String pendingBaseName = null;
     private String pendingFingerprint = null;
+
+    // ── Async fulfilled order tracking ──
+    // When an order fulfills while the player is offline, there are no chat messages.
+    // Instead: VIEWING_TRADES shows "Fulfilled - Sold/Bought X/Y items", and clicking
+    // the order goes to VIEWING_ORDER where slot 52 is "Withdraw Items".
+    // Clicking withdraw changes slot 52 to "Closing your order..." — that's our commit signal.
+
+    /** Cached transaction type from VIEWING_TRADES lore ("Fulfilled - Sold/Bought"). Keyed by lowercase item name. */
+    private final Map<String, TransactionRecord.Type> fulfilledOrderTypes = new HashMap<>();
+
+    /** Context for an async withdrawal detected in VIEWING_ORDER. */
+    private record PendingWithdrawal(String itemName, String baseName, String fingerprint,
+                                     long price, TransactionRecord.Type type) {}
+    private PendingWithdrawal pendingWithdrawal = null;
 
     // Sell screen overlay: matched buy price to show when selling
     private static volatile TransactionRecord matchedBuyRecord = null;
@@ -140,6 +158,17 @@ public class TradeMarketLogger {
             currentSellBaseName = null;
         }
 
+        // Clear pending withdrawal when leaving VIEWING_ORDER
+        if (oldState == TradeMarketState.VIEWING_ORDER && newState != TradeMarketState.VIEWING_ORDER) {
+            pendingWithdrawal = null;
+        }
+
+        // Reset default sort flag and clear fulfilled order cache when trade market closes
+        if (newState == TradeMarketState.NOT_ACTIVE) {
+            TradeMarketScreenMixin.wynnsort$resetDefaultSort();
+            fulfilledOrderTypes.clear();
+        }
+
         lastKnownState = newState;
     }
 
@@ -180,12 +209,16 @@ public class TradeMarketLogger {
             logContainerContent(event, state);
         }
 
-        // Transaction capture: during BUYING or SELLING state
+        // Transaction capture: during BUYING, SELLING, VIEWING_TRADES, or VIEWING_ORDER
         if (WynnSortConfig.INSTANCE.tradeHistoryEnabled) {
             if (state == TradeMarketState.BUYING) {
                 captureBuyContext(event.getItems());
             } else if (state == TradeMarketState.SELLING) {
                 captureSellContext(event.getItems());
+            } else if (state == TradeMarketState.VIEWING_TRADES) {
+                scanFulfilledOrders(event.getItems());
+            } else if (state == TradeMarketState.VIEWING_ORDER) {
+                captureWithdrawalContext(event.getItems());
             }
         }
     }
@@ -249,6 +282,15 @@ public class TradeMarketLogger {
                                 existing.itemName, existing.baseName, existing.fingerprint, price));
                         tmLog("Sell price captured from slot update {}: {}", slot, price);
                     }
+                }
+            } else if (state == TradeMarketState.VIEWING_ORDER && slot == 52
+                    && pendingWithdrawal != null) {
+                // Detect "Closing your order..." on slot 52 — means the player clicked withdraw
+                String name = stack.getHoverName().getString();
+                String cleanName = ItemNameHelper.cleanItemName(name);
+                if (cleanName != null && cleanName.contains("Closing your order")) {
+                    tmLog(">>> Async withdrawal confirmed (slot 52 = 'Closing your order...')");
+                    commitWithdrawal();
                 }
             }
         }
@@ -576,6 +618,250 @@ public class TradeMarketLogger {
         } catch (Exception e) {
             tmWarn("Error capturing sell context", e);
         }
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    //  ASYNC FULFILLED ORDER DETECTION
+    // ────────────────────────────────────────────────────────────────────
+
+    /**
+     * Scan trade slots in VIEWING_TRADES for "Fulfilled - Sold X/Y items" or
+     * "Fulfilled - Bought X/Y items" lore. Caches the transaction type by item name
+     * so we know whether a subsequent VIEWING_ORDER is a buy or sell withdrawal.
+     */
+    private void scanFulfilledOrders(List<ItemStack> items) {
+        if (items == null) return;
+        fulfilledOrderTypes.clear();
+
+        try {
+            for (int i = 0; i < items.size(); i++) {
+                ItemStack stack = items.get(i);
+                if (stack == null || stack.isEmpty()) continue;
+
+                List<String> loreLines = getPlainLoreLines(stack);
+                for (String line : loreLines) {
+                    if (line.contains("Fulfilled")) {
+                        // Extract the item name from the stack's hover name
+                        String itemName = ItemNameHelper.cleanItemName(stack.getHoverName().getString());
+                        if (itemName == null || itemName.isEmpty()) break;
+                        // Also try Wynntils base name
+                        String baseName = ItemNameHelper.extractBaseName(stack);
+                        String key = (baseName != null ? baseName : itemName).toLowerCase();
+
+                        if (line.contains("Sold")) {
+                            fulfilledOrderTypes.put(key, TransactionRecord.Type.SELL);
+                            tmLog("Fulfilled SELL detected at slot {} for \"{}\": \"{}\"", i, key, line);
+                        } else if (line.contains("Bought")) {
+                            fulfilledOrderTypes.put(key, TransactionRecord.Type.BUY);
+                            tmLog("Fulfilled BUY detected at slot {} for \"{}\": \"{}\"", i, key, line);
+                        }
+                        break;
+                    }
+                }
+            }
+
+            if (!fulfilledOrderTypes.isEmpty()) {
+                tmLog("Fulfilled orders found: {}", fulfilledOrderTypes.size());
+            }
+        } catch (Exception e) {
+            tmWarn("Error scanning fulfilled orders: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * In VIEWING_ORDER, capture item details from slot 28 and check slot 52 for
+     * "Withdraw Items" / "Your order has been fulfilled". Builds a PendingWithdrawal
+     * so we can commit it when slot 52 changes to "Closing your order...".
+     */
+    private void captureWithdrawalContext(List<ItemStack> items) {
+        if (items == null || items.size() <= 52) return;
+
+        try {
+            // Check slot 52 for "Withdraw Items" with "Your order has been fulfilled"
+            ItemStack actionSlot = items.get(52);
+            if (actionSlot == null || actionSlot.isEmpty()) return;
+
+            String actionName = ItemNameHelper.cleanItemName(actionSlot.getHoverName().getString());
+            if (actionName == null || !actionName.contains("Withdraw Items")) return;
+
+            // Verify the "fulfilled" lore
+            List<String> actionLore = getPlainLoreLines(actionSlot);
+            boolean isFulfilled = false;
+            for (String line : actionLore) {
+                if (line.contains("Your order has been fulfilled")) {
+                    isFulfilled = true;
+                    break;
+                }
+            }
+            if (!isFulfilled) return;
+
+            // Capture item from slot 28
+            ItemStack itemSlot = items.get(28);
+            if (itemSlot == null || itemSlot.isEmpty()) {
+                tmWarn("Async withdrawal: slot 28 is empty, cannot capture item");
+                return;
+            }
+
+            String baseName = ItemNameHelper.extractBaseName(itemSlot);
+            String itemName = baseName;
+            if (itemName == null) {
+                // Fallback: use hover name
+                itemName = ItemNameHelper.cleanItemName(itemSlot.getHoverName().getString());
+            }
+            if (itemName == null || itemName.isEmpty()) {
+                tmWarn("Async withdrawal: could not determine item name from slot 28");
+                return;
+            }
+
+            String fingerprint = buildStatFingerprint(itemSlot);
+
+            // Extract price — try slot 28 lore first (format: "X x Y²"),
+            // then scan other slots for price info
+            long price = extractOrderPrice(itemSlot);
+            if (price <= 0) {
+                for (int i = 0; i < items.size(); i++) {
+                    if (i == 28 || i == 52) continue;
+                    ItemStack s = items.get(i);
+                    if (s == null || s.isEmpty()) continue;
+                    price = extractOrderPrice(s);
+                    if (price > 0) {
+                        tmLog("Order price found in slot {}: {}", i, price);
+                        break;
+                    }
+                }
+            }
+
+            // Determine transaction type from our VIEWING_TRADES fulfilled order cache.
+            // Match the item from slot 28 against the fulfilled order types we cached.
+            TransactionRecord.Type txType = null;
+            String lookupKey = (baseName != null ? baseName : itemName).toLowerCase();
+            txType = fulfilledOrderTypes.get(lookupKey);
+
+            // Fuzzy match if exact key didn't work
+            if (txType == null) {
+                for (var entry : fulfilledOrderTypes.entrySet()) {
+                    if (containsIgnoreCase(lookupKey, entry.getKey())
+                            || containsIgnoreCase(entry.getKey(), lookupKey)) {
+                        txType = entry.getValue();
+                        tmLog("Fulfilled type matched via fuzzy: \"{}\" ~ \"{}\" -> {}",
+                                lookupKey, entry.getKey(), txType);
+                        break;
+                    }
+                }
+            }
+
+            // If type still unknown, try to infer from context
+            if (txType == null) {
+                if (baseName != null && pendingSells.containsKey(baseName.toLowerCase())) {
+                    txType = TransactionRecord.Type.SELL;
+                } else {
+                    // Default to SELL since sells are more commonly async
+                    txType = TransactionRecord.Type.SELL;
+                    tmWarn("Async withdrawal: could not determine type for \"{}\", defaulting to SELL",
+                            itemName);
+                }
+            }
+
+            pendingWithdrawal = new PendingWithdrawal(itemName, baseName, fingerprint, price, txType);
+            tmLog("Pending withdrawal captured: type={}, item=\"{}\", base=\"{}\", fingerprint={}, price={}",
+                    txType, itemName, baseName,
+                    fingerprint != null ? "yes(" + fingerprint.length() + "chars)" : "null",
+                    price);
+
+        } catch (Exception e) {
+            tmWarn("Error capturing withdrawal context: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * Commit a pending async withdrawal as a transaction (BUY or SELL).
+     * Called when slot 52 changes to "Closing your order..." in VIEWING_ORDER.
+     */
+    private void commitWithdrawal() {
+        if (pendingWithdrawal == null) {
+            tmWarn("commitWithdrawal called but no pending withdrawal");
+            return;
+        }
+
+        PendingWithdrawal w = pendingWithdrawal;
+        pendingWithdrawal = null;
+
+        tmLog("Committing async {}: item=\"{}\", base=\"{}\", price={}",
+                w.type, w.itemName, w.baseName, w.price);
+
+        TransactionStore.addTransaction(new TransactionRecord(
+                w.itemName, w.price > 0 ? w.price : 0, w.type, "", 1,
+                w.baseName, w.fingerprint));
+
+        DiagnosticLog.event(DiagnosticLog.Category.TRADE_MARKET, "transaction",
+                Map.of("type", w.type.name(), "item", w.itemName,
+                        "price", w.price > 0 ? w.price : 0, "source", "async_withdrawal"));
+
+        // If this was a sell, also remove the matching pending sell context if one exists
+        if (w.type == TransactionRecord.Type.SELL && w.baseName != null) {
+            pendingSells.remove(w.baseName.toLowerCase());
+        }
+    }
+
+    /**
+     * Extract price from VIEWING_ORDER item lore.
+     * Handles the format "X x Y²" where X is quantity (often 0 for fulfilled)
+     * and Y is the unit price. Also falls back to standard price extraction.
+     */
+    private long extractOrderPrice(ItemStack stack) {
+        try {
+            List<String> loreLines = getPlainLoreLines(stack);
+            for (String text : loreLines) {
+                // "0 x 810,024²" — the ² is stripped by getString(), leaving "0 x 810,024"
+                Matcher m = ORDER_PRICE_PATTERN.matcher(text);
+                if (m.find()) {
+                    long unitPrice = Long.parseLong(m.group(2).replace(",", ""));
+                    if (unitPrice > 0) {
+                        tmLog("Order price from lore: unitPrice={}", unitPrice);
+                        return unitPrice;
+                    }
+                }
+
+                // Also try denomination format from parenthetical "(3stx 5.76¼²)"
+                long denomTotal = parseDenominations(text);
+                if (denomTotal > 0) {
+                    tmLog("Order price from denomination: {}", denomTotal);
+                    return denomTotal;
+                }
+            }
+        } catch (Exception e) {
+            tmLog("Order price extraction error: {}", e.getMessage());
+        }
+
+        // Fall back to standard price extraction
+        return extractPriceFromStack(stack);
+    }
+
+    /**
+     * Get plain-text lore lines from an ItemStack, stripping formatting codes.
+     */
+    private List<String> getPlainLoreLines(ItemStack stack) {
+        List<String> result = new ArrayList<>();
+        try {
+            Minecraft mc = Minecraft.getInstance();
+            net.minecraft.world.item.Item.TooltipContext ctx;
+            if (mc.level != null) {
+                ctx = net.minecraft.world.item.Item.TooltipContext.of(mc.level);
+            } else {
+                ctx = net.minecraft.world.item.Item.TooltipContext.EMPTY;
+            }
+            var tooltipLines = stack.getTooltipLines(ctx, mc.player,
+                    net.minecraft.world.item.TooltipFlag.NORMAL);
+            if (tooltipLines != null) {
+                for (var line : tooltipLines) {
+                    String text = line.getString();
+                    if (text != null && !text.isEmpty()) {
+                        result.add(text);
+                    }
+                }
+            }
+        } catch (Exception ignored) {}
+        return result;
     }
 
     /**

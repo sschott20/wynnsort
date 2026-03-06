@@ -62,6 +62,8 @@ public class WynnSortConfig {
     public int crowdsourceFlushMinutes = 5;
     /** Enable structured diagnostic logging (JSONL events + in-game viewer) */
     public boolean diagnosticLoggingEnabled = true;
+    /** Auto-set trade market sort to "most recent" on first search each session */
+    public boolean defaultSortMostRecent = true;
 
     // --- HUD positions (0.0-1.0 of screen, -1 = use default) ---
 

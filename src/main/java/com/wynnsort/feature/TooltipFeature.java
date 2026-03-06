@@ -114,13 +114,20 @@ public class TooltipFeature {
         int linesAdded = 0;
 
         if (entry != null) {
-            String priceStr = MarketPriceFeature.formatEmeralds(entry.price);
+            int taxPercent = WynnSortConfig.INSTANCE.tradeMarketBuyTaxPercent;
+            long displayPrice = taxPercent > 0
+                    ? entry.price + (entry.price * taxPercent / 100)
+                    : entry.price;
+            String priceStr = MarketPriceFeature.formatEmeralds(displayPrice);
             String ageStr = MarketPriceFeature.formatAge(System.currentTimeMillis() - entry.timestamp);
             PriceStats stats = WynnSortConfig.INSTANCE.priceHistoryEnabled
                     ? PriceHistoryStore.getStats(baseName) : null;
 
             StringBuilder mainLine = new StringBuilder();
             mainLine.append("\u00A77Market: \u00A7e").append(priceStr);
+            if (taxPercent > 0) {
+                mainLine.append(" \u00A78(+").append(taxPercent).append("% tax)");
+            }
             mainLine.append(" \u00A78(").append(ageStr).append(" ago)");
 
             if (stats != null && stats.trend() != PriceTrend.UNKNOWN) {
@@ -135,22 +142,6 @@ public class TooltipFeature {
 
             tooltips.add(insertIndex + linesAdded, Component.literal(mainLine.toString()));
             linesAdded++;
-
-            int taxPercent = WynnSortConfig.INSTANCE.tradeMarketBuyTaxPercent;
-            if (taxPercent > 0) {
-                long buyerCost = entry.price + (entry.price * taxPercent / 100);
-                String taxLine = "\u00A77w/ " + taxPercent + "% tax: \u00A7e" + MarketPriceFeature.formatEmeralds(buyerCost);
-                tooltips.add(insertIndex + linesAdded, Component.literal(taxLine));
-                linesAdded++;
-            }
-
-            if (stats != null && stats.count() > 1) {
-                String rangeLine = "\u00A77Range: \u00A7f" + MarketPriceFeature.formatEmeralds(stats.min())
-                        + " \u00A77- \u00A7f" + MarketPriceFeature.formatEmeralds(stats.max())
-                        + " \u00A78(" + stats.count() + " seen)";
-                tooltips.add(insertIndex + linesAdded, Component.literal(rangeLine));
-                linesAdded++;
-            }
         }
 
         if (WynnSortConfig.INSTANCE.crowdsourceEnabled) {

@@ -8,7 +8,6 @@ import com.wynnsort.util.DiagnosticLog;
 import com.wynnsort.util.FeatureLogger;
 import com.wynntils.core.components.Models;
 import com.wynntils.mc.event.ContainerSetContentEvent;
-import com.wynntils.models.containers.Container;
 import com.wynntils.models.gear.type.GearTier;
 import com.wynntils.models.items.WynnItem;
 import com.wynntils.models.items.items.game.GearItem;
@@ -170,31 +169,12 @@ public class DryStreakTracker implements HudRenderCallback {
         }
         if (state == LootrunningState.NOT_RUNNING) return;
 
-        // Check if this is a lootrun reward chest container
-        boolean isRewardChest = false;
-        try {
-            Container container = Models.Container.getCurrentContainer();
-            if (container != null) {
-                String containerName = container.getContainerName();
-                String className = container.getClass().getSimpleName();
-                // Exploratory: log container class/title/slot count for discovery
-                LOG.info("Container scan: class={}, fullClass={}, title=\"{}\", id={}",
-                        className, container.getClass().getName(), containerName,
-                        container.getContainerId());
-                isRewardChest = className.contains("LootrunRewardChest")
-                        || (containerName != null && containerName.toLowerCase().contains("lootrun reward"));
-            }
-        } catch (Exception e) {
-            LOG.warn("Could not determine container type: {}", e.getMessage());
-        }
+        if (!LootrunSessionStats.isCurrentContainerRewardChest()) return;
 
-        if (!isRewardChest) return;
-
-        // Scan items for mythic gear
         List<ItemStack> items = event.getItems();
         if (items == null || items.isEmpty()) return;
 
-        LOG.info("Scanning reward chest: {} slots for mythics", items.size());
+        LOG.info("Scanning reward chest ({} slots) for mythics", items.size());
         scanForMythics(items);
     }
 

@@ -4,6 +4,7 @@ import com.wynnsort.SortState;
 import com.wynnsort.WynnSortMod;
 import com.wynnsort.config.WynnSortConfig;
 import com.wynntils.screens.base.widgets.ItemSearchWidget;
+import com.wynntils.screens.trademarket.TradeMarketSearchResultHolder;
 import com.wynntils.screens.trademarket.TradeMarketSearchResultScreen;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
@@ -25,8 +26,19 @@ public abstract class TradeMarketScreenMixin extends Screen {
     @Shadow(remap = false)
     private ItemSearchWidget itemSearchWidget;
 
+    @Shadow(remap = false)
+    private TradeMarketSearchResultHolder holder;
+
     @Unique
     private static final Pattern SORT_PATTERN = Pattern.compile("\\bsort:\\S+");
+
+    /**
+     * Tracks whether we've already applied the default "most recent" sort
+     * for this trade market session. Reset when the trade market closes
+     * (via {@link #wynnsort$resetDefaultSort()}).
+     */
+    @Unique
+    private static boolean wynnsort$defaultSortApplied = false;
 
     @Unique
     private Button wynnsort$sortButton;
@@ -76,6 +88,20 @@ public abstract class TradeMarketScreenMixin extends Screen {
         wynnsort$statInput.setValue(SortState.getTargetStat());
         wynnsort$statInput.setResponder(this::wynnsort$onStatInputChanged);
         this.addRenderableWidget(wynnsort$statInput);
+
+        // Auto-set sort to "most recent" on the first search of this trade market session.
+        // The Wynncraft trade market defaults to sorting by level. Clicking the sort button
+        // once (left click = mouse button 0) cycles it to "most recent". Once set, the
+        // server remembers the choice until the trade market is closed entirely.
+        if (!wynnsort$defaultSortApplied && WynnSortConfig.INSTANCE.defaultSortMostRecent && holder != null) {
+            try {
+                holder.changeSortingMode(0); // left click cycles: Level -> Most Recent
+                wynnsort$defaultSortApplied = true;
+                WynnSortMod.log("[WS:Sort] Applied default sort: most recent");
+            } catch (Exception e) {
+                WynnSortMod.logWarn("[WS:Sort] Failed to apply default sort: {}", e.getMessage());
+            }
+        }
     }
 
     @Unique
@@ -125,5 +151,16 @@ public abstract class TradeMarketScreenMixin extends Screen {
         Matcher m = SORT_PATTERN.matcher(currentText);
         String newText = m.replaceAll("").trim();
         itemSearchWidget.setTextBoxInput(newText);
+    }
+
+    /**
+     * Resets the default sort flag so the next trade market session
+     * will apply "most recent" sort again on first search.
+     * Called by {@link com.wynnsort.feature.TradeMarketLogger} when the
+     * trade market state transitions to NOT_ACTIVE.
+     */
+    @Unique
+    public static void wynnsort$resetDefaultSort() {
+        wynnsort$defaultSortApplied = false;
     }
 }

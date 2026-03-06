@@ -40,9 +40,14 @@ public class LootrunSessionData {
     public int sacrifices;
     public int mobsKilled;
     public int chestsOpened;
-    public long xpEarned;
     public boolean completed;
     public long endTime;
+    /** Lootrun location name (e.g. "Silent Expanse"), null if unknown */
+    public String location;
+    /** Number of reward chests opened during the lootrun */
+    public int rewardChestsOpened;
+    /** Total items looted from reward chests (counts stack sizes for stackable items). */
+    public int itemsLooted;
 
     public LootrunSessionData() { this.startTime = System.currentTimeMillis(); }
 
