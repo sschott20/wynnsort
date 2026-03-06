@@ -63,6 +63,7 @@ public final class LootrunLocationHelper {
         String[] parts = enumName.split("_");
         StringBuilder sb = new StringBuilder();
         for (String part : parts) {
+            if (part.isEmpty()) continue;
             if (sb.length() > 0) sb.append(" ");
             sb.append(part.charAt(0));
             sb.append(part.substring(1).toLowerCase());

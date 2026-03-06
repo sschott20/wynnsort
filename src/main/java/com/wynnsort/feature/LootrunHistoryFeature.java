@@ -31,6 +31,10 @@ public class LootrunHistoryFeature {
             record.location = session.location;
             record.rewardChestsOpened = session.rewardChestsOpened;
             record.itemsLooted = session.itemsLooted;
+            if (!session.beaconCounts.isEmpty()) {
+                record.beaconCounts.putAll(session.beaconCounts);
+            }
+            record.vibrantBeacons = session.vibrantCount;
         }
     }
 
