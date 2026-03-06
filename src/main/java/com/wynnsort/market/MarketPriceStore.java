@@ -13,6 +13,8 @@ import java.io.Writer;
 import java.lang.reflect.Type;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -104,10 +106,13 @@ public class MarketPriceStore {
     private static void saveToDisk() {
         try {
             Files.createDirectories(STORE_PATH.getParent());
+
+            Map<String, MarketPriceEntry> snapshot = new HashMap<>(prices);
+
             try (Writer writer = Files.newBufferedWriter(STORE_PATH)) {
-                GSON.toJson(prices, MAP_TYPE, writer);
+                GSON.toJson(snapshot, MAP_TYPE, writer);
             }
-            WynnSortMod.log("Saved {} market prices to {}", prices.size(), STORE_PATH);
+            WynnSortMod.log("Saved {} market prices to {}", snapshot.size(), STORE_PATH);
         } catch (IOException e) {
             WynnSortMod.logError("Failed to save market prices", e);
         }

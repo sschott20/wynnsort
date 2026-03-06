@@ -38,7 +38,10 @@ public final class ItemNameHelper {
             if (item instanceof EmeraldItem) return null;
 
             if (item instanceof GearItem gearItem) {
-                try { return cleanItemName(gearItem.getItemInfo().name()); } catch (Exception ignored) {}
+                try {
+                    String name = cleanItemName(gearItem.getItemInfo().name());
+                    if (name != null && !name.isEmpty()) return name;
+                } catch (Exception ignored) {}
             }
 
             return extractFromHoverName(stack);
@@ -54,9 +57,11 @@ public final class ItemNameHelper {
         String name = stack.getHoverName().getString();
         if (name != null && !name.isEmpty()) {
             name = cleanItemName(name);
+            if (name == null || name.isEmpty()) return null;
             if (name.startsWith("Unidentified ")) {
                 name = name.substring("Unidentified ".length());
             }
+            if (name.isEmpty()) return null;
             return name;
         }
         return null;
