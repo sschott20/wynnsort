@@ -1,6 +1,5 @@
 package com.wynnsort.util;
 
-import com.wynnsort.SortState;
 import com.wynnsort.StatFilter;
 import com.wynnsort.config.WynnSortConfig;
 import com.wynntils.models.gear.type.GearInfo;
@@ -22,10 +21,14 @@ public final class ScoreComputation {
      */
     public static float computeScore(GearItem gearItem, GearInstance gearInstance,
                                      List<StatFilter> filters) {
-        if (SortState.isOverall()) {
+        boolean overall = filters.isEmpty();
+        boolean filterMode = !overall && filters.stream().anyMatch(StatFilter::hasThreshold);
+
+        if (overall) {
             // Items with no rollable stats return 0% from getOverallPercentage(),
             // which is misleading. Return NaN to indicate "not applicable".
-            if (gearInstance.identifications() == null || gearInstance.identifications().isEmpty()) {
+            List<StatActualValue> ids = gearInstance.identifications();
+            if (ids == null || ids.isEmpty()) {
                 return Float.NaN;
             }
             if (WynnSortConfig.INSTANCE.useWeightedScale) {
@@ -33,7 +36,7 @@ public final class ScoreComputation {
                 if (!Float.isNaN(weighted) && weighted > 0.0f) return weighted;
             }
             return gearInstance.getOverallPercentage();
-        } else if (SortState.isFilterMode()) {
+        } else if (filterMode) {
             float totalPct = 0f;
             int count = 0;
             for (StatFilter filter : filters) {
@@ -71,7 +74,9 @@ public final class ScoreComputation {
                                               String pattern) {
         String target = pattern.toLowerCase().trim();
 
-        for (StatActualValue actual : gearInstance.identifications()) {
+        List<StatActualValue> ids = gearInstance.identifications();
+        if (ids == null) return Float.NaN;
+        for (StatActualValue actual : ids) {
             if (statMatches(actual, target)) {
                 GearInfo gearInfo = gearItem.getItemInfo();
                 StatPossibleValues possible = gearInfo.getPossibleValues(actual.statType());
