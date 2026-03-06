@@ -141,7 +141,12 @@ public class CrowdsourceCollector {
         if (baseName == null) return null;
 
         // Get price via Wynntils
-        TradeMarketPriceInfo priceInfo = Models.TradeMarket.calculateItemPriceInfo(stack);
+        TradeMarketPriceInfo priceInfo;
+        try {
+            priceInfo = Models.TradeMarket.calculateItemPriceInfo(stack);
+        } catch (Exception e) {
+            return null;
+        }
         if (priceInfo == null || priceInfo == TradeMarketPriceInfo.EMPTY || priceInfo.price() <= 0) {
             return null;
         }
@@ -229,10 +234,10 @@ public class CrowdsourceCollector {
             return;
         }
 
-        try {
-            List<CrowdsourceEntry> entries = CrowdsourceQueue.INSTANCE.drain();
-            if (entries.isEmpty()) return;
+        List<CrowdsourceEntry> entries = CrowdsourceQueue.INSTANCE.drain();
+        if (entries.isEmpty()) return;
 
+        try {
             WynnSortMod.log("[WS:Crowd] Flushing {} entries", entries.size());
             CrowdsourceClient.INSTANCE.submitBatch(entries);
 
@@ -244,6 +249,10 @@ public class CrowdsourceCollector {
             flushFailureCount = 0;
             nextAllowedFlushTime = 0;
         } catch (Exception e) {
+            // Re-queue entries so they aren't lost
+            for (CrowdsourceEntry entry : entries) {
+                CrowdsourceQueue.INSTANCE.add(entry);
+            }
             flushFailureCount++;
 
             if (flushFailureCount >= MAX_CONSECUTIVE_FAILURES) {
