@@ -181,9 +181,14 @@ public class TooltipFeature {
     private ScoreResult computeScore(GearItem gearItem, GearInstance gearInstance, List<StatFilter> filters) {
         float pct = ScoreComputation.computeScore(gearItem, gearInstance, filters);
         if (Float.isNaN(pct)) return null;
-        String label = SortState.isOverall() ? "overall"
-                : SortState.isFilterMode() ? "filtered avg"
-                : filters.get(0).statPattern();
+        String label;
+        if (filters.isEmpty()) {
+            label = "overall";
+        } else if (filters.stream().anyMatch(StatFilter::hasThreshold)) {
+            label = "filtered avg";
+        } else {
+            label = filters.get(0).statPattern();
+        }
         return new ScoreResult(pct, label);
     }
 
