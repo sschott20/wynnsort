@@ -13,8 +13,21 @@ public final class SortState {
 
     private static String rawInput = "";
     private static List<StatFilter> filters = List.of();
+    private static boolean defaultSortApplied = false;
 
     private SortState() {}
+
+    public static boolean isDefaultSortApplied() {
+        return defaultSortApplied;
+    }
+
+    public static void setDefaultSortApplied(boolean applied) {
+        defaultSortApplied = applied;
+    }
+
+    public static void resetDefaultSort() {
+        defaultSortApplied = false;
+    }
 
     public static String getRawInput() {
         return rawInput;

@@ -2,7 +2,7 @@ package com.wynnsort.feature;
 
 import com.wynnsort.WynnSortMod;
 import com.wynnsort.config.WynnSortConfig;
-import com.wynnsort.mixin.TradeMarketScreenMixin;
+import com.wynnsort.SortState;
 import com.wynnsort.util.ItemNameHelper;
 import com.wynnsort.history.TransactionRecord;
 import com.wynnsort.history.TransactionStore;
@@ -173,7 +173,7 @@ public class TradeMarketLogger {
 
         // Reset default sort flag and clear fulfilled order cache when trade market closes
         if (newState == TradeMarketState.NOT_ACTIVE) {
-            TradeMarketScreenMixin.wynnsort$resetDefaultSort();
+            SortState.resetDefaultSort();
             fulfilledOrderTypes.clear();
         }
 

@@ -32,14 +32,6 @@ public abstract class TradeMarketScreenMixin extends Screen {
     @Unique
     private static final Pattern SORT_PATTERN = Pattern.compile("\\bsort:\\S+");
 
-    /**
-     * Tracks whether we've already applied the default "most recent" sort
-     * for this trade market session. Reset when the trade market closes
-     * (via {@link #wynnsort$resetDefaultSort()}).
-     */
-    @Unique
-    private static boolean wynnsort$defaultSortApplied = false;
-
     @Unique
     private Button wynnsort$sortButton;
 
@@ -91,10 +83,10 @@ public abstract class TradeMarketScreenMixin extends Screen {
         // The Wynncraft trade market defaults to sorting by level. Clicking the sort button
         // once (left click = mouse button 0) cycles it to "most recent". Once set, the
         // server remembers the choice until the trade market is closed entirely.
-        if (!wynnsort$defaultSortApplied && WynnSortConfig.INSTANCE.defaultSortMostRecent && holder != null) {
+        if (!SortState.isDefaultSortApplied() && WynnSortConfig.INSTANCE.defaultSortMostRecent && holder != null) {
             try {
                 holder.changeSortingMode(0); // left click cycles: Level -> Most Recent
-                wynnsort$defaultSortApplied = true;
+                SortState.setDefaultSortApplied(true);
                 WynnSortMod.log("[WS:Sort] Applied default sort: most recent");
             } catch (Exception e) {
                 WynnSortMod.logWarn("[WS:Sort] Failed to apply default sort: {}", e.getMessage());
@@ -151,14 +143,4 @@ public abstract class TradeMarketScreenMixin extends Screen {
         itemSearchWidget.setTextBoxInput(newText);
     }
 
-    /**
-     * Resets the default sort flag so the next trade market session
-     * will apply "most recent" sort again on first search.
-     * Called by {@link com.wynnsort.feature.TradeMarketLogger} when the
-     * trade market state transitions to NOT_ACTIVE.
-     */
-    @Unique
-    public static void wynnsort$resetDefaultSort() {
-        wynnsort$defaultSortApplied = false;
-    }
 }
