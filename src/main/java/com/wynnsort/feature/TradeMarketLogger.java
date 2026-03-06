@@ -313,6 +313,11 @@ public class TradeMarketLogger {
                         tmLog("Sell price captured from slot update {}: {}", slot, price);
                     }
                 }
+            } else if (state == TradeMarketState.VIEWING_TRADES) {
+                // Scan individual slot updates for fulfilled order info.
+                // The first VIEWING_TRADES content event often arrives with empty trade slots;
+                // the actual items come in via slot updates. We must scan them here too.
+                scanSingleSlotForFulfilled(slot, stack);
             } else if (state == TradeMarketState.VIEWING_ORDER && slot == 52
                     && pendingWithdrawal != null) {
                 // Detect "Closing your order..." on slot 52 — means the player clicked withdraw
@@ -663,7 +668,8 @@ public class TradeMarketLogger {
      */
     private void scanFulfilledOrders(List<ItemStack> items) {
         if (items == null) return;
-        fulfilledOrderTypes.clear();
+        // Don't clear — slot updates may have already populated entries via scanSingleSlotForFulfilled.
+        // Content events will re-add or overwrite entries, which is fine.
 
         try {
             for (int i = 0; i < items.size(); i++) {
@@ -697,6 +703,36 @@ public class TradeMarketLogger {
             }
         } catch (Exception e) {
             tmWarn("Error scanning fulfilled orders: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * Scan a single slot update in VIEWING_TRADES for fulfilled order info.
+     * Complements scanFulfilledOrders: the initial content event may arrive with
+     * empty trade slots, and the actual items come in via individual slot updates.
+     */
+    private void scanSingleSlotForFulfilled(int slot, ItemStack stack) {
+        try {
+            List<String> loreLines = getPlainLoreLines(stack);
+            for (String line : loreLines) {
+                if (line.contains("Fulfilled")) {
+                    String itemName = ItemNameHelper.cleanItemName(stack.getHoverName().getString());
+                    if (itemName == null || itemName.isEmpty()) return;
+                    String baseName = ItemNameHelper.extractBaseName(stack);
+                    String key = (baseName != null ? baseName : itemName).toLowerCase();
+
+                    if (line.contains("Sold")) {
+                        fulfilledOrderTypes.put(key, TransactionRecord.Type.SELL);
+                        tmLog("Fulfilled SELL detected from slot update {} for \"{}\": \"{}\"", slot, key, line);
+                    } else if (line.contains("Bought")) {
+                        fulfilledOrderTypes.put(key, TransactionRecord.Type.BUY);
+                        tmLog("Fulfilled BUY detected from slot update {} for \"{}\": \"{}\"", slot, key, line);
+                    }
+                    return;
+                }
+            }
+        } catch (Exception e) {
+            tmWarn("Error scanning slot {} for fulfilled: {}", slot, e.getMessage());
         }
     }
 
@@ -747,17 +783,29 @@ public class TradeMarketLogger {
 
             String fingerprint = buildStatFingerprint(itemSlot);
 
-            // Extract price — try slot 28 lore first (format: "X x Y²"),
-            // then scan other slots for price info
-            long price = extractOrderPrice(itemSlot);
+            // Extract price from VIEWING_ORDER screen.
+            // Strategy 1: Compute total from emerald item stacks in trade area (most reliable).
+            // Strategy 2: Parse lore from slot 28 (order item) using ORDER_PRICE_PATTERN only.
+            // Strategy 3: Parse lore from trade-area slots (0-53) only — never scan
+            //   player inventory (54+) which has gear stats that produce false positives.
+            long price = computeEmeraldTotal(items);
+            if (price > 0) {
+                tmLog("Order price from emerald stacks: {}", price);
+            }
             if (price <= 0) {
-                for (int i = 0; i < items.size(); i++) {
+                price = extractOrderPrice(itemSlot);
+                if (price > 0) {
+                    tmLog("Order price from slot 28 lore: {}", price);
+                }
+            }
+            if (price <= 0) {
+                for (int i = 0; i < Math.min(items.size(), 54); i++) {
                     if (i == 28 || i == 52) continue;
                     ItemStack s = items.get(i);
                     if (s == null || s.isEmpty()) continue;
                     price = extractOrderPrice(s);
                     if (price > 0) {
-                        tmLog("Order price found in slot {}: {}", i, price);
+                        tmLog("Order price from trade-area slot {} lore: {}", i, price);
                         break;
                     }
                 }
@@ -786,11 +834,32 @@ public class TradeMarketLogger {
             if (txType == null) {
                 if (baseName != null && pendingSells.containsKey(baseName.toLowerCase())) {
                     txType = TransactionRecord.Type.SELL;
+                    tmLog("Type inferred from pending sells: SELL for \"{}\"", baseName);
                 } else {
-                    // Default to BUY: if we're withdrawing an actual item (not emeralds), it's a buy
-                    txType = TransactionRecord.Type.BUY;
-                    tmWarn("Async withdrawal: could not determine type for \"{}\", defaulting to BUY (fulfilledOrderTypes keys={})",
-                            itemName, fulfilledOrderTypes.keySet());
+                    // Infer from emerald stacks in trade area: if there are emeralds to
+                    // withdraw alongside the item, this is a SELL (collecting proceeds).
+                    // A BUY withdrawal typically only has the item itself.
+                    boolean hasEmeralds = false;
+                    for (int i = 0; i < Math.min(items.size(), 54); i++) {
+                        if (i == 28 || i == 46 || i == 52) continue;
+                        ItemStack s = items.get(i);
+                        if (s == null || s.isEmpty()) continue;
+                        try {
+                            Optional<WynnItem> opt = Models.Item.getWynnItem(s);
+                            if (opt.isPresent() && opt.get() instanceof EmeraldItem) {
+                                hasEmeralds = true;
+                                break;
+                            }
+                        } catch (Exception ignored) {}
+                    }
+                    if (hasEmeralds) {
+                        txType = TransactionRecord.Type.SELL;
+                        tmLog("Type inferred from emerald stacks in trade area: SELL for \"{}\"", itemName);
+                    } else {
+                        txType = TransactionRecord.Type.BUY;
+                        tmWarn("Async withdrawal: could not determine type for \"{}\", defaulting to BUY (fulfilledOrderTypes keys={})",
+                                itemName, fulfilledOrderTypes.keySet());
+                    }
                 }
             }
 
@@ -856,6 +925,8 @@ public class TradeMarketLogger {
      */
     private long extractOrderPrice(ItemStack stack) {
         try {
+            String stackName = "?";
+            try { stackName = stack.getHoverName().getString(); } catch (Exception ignored) {}
             List<String> loreLines = getPlainLoreLines(stack);
 
             // Priority 1: "X x Y" format (most specific to order screens)
@@ -864,7 +935,8 @@ public class TradeMarketLogger {
                 if (m.find()) {
                     long unitPrice = Long.parseLong(m.group(2).replace(",", ""));
                     if (unitPrice > 0) {
-                        tmLog("Order price from lore: unitPrice={}", unitPrice);
+                        tmLog("Order price from \"{}\" lore (XxY): unitPrice={}, line=\"{}\"",
+                                stackName, unitPrice, text);
                         return unitPrice;
                     }
                 }
@@ -873,20 +945,31 @@ public class TradeMarketLogger {
             // Priority 2: Explicit "Price:/Total:/Cost:" pattern
             for (String text : loreLines) {
                 Matcher m = LORE_PRICE_PATTERN.matcher(text);
-                if (m.find()) return Long.parseLong(m.group(1).replace(",", ""));
+                if (m.find()) {
+                    long p = Long.parseLong(m.group(1).replace(",", ""));
+                    tmLog("Order price from \"{}\" lore (Price/Total): {}, line=\"{}\"",
+                            stackName, p, text);
+                    return p;
+                }
             }
 
             // Priority 3: "X emeralds" pattern
             for (String text : loreLines) {
                 Matcher m = LORE_EMERALD_PATTERN.matcher(text);
-                if (m.find()) return Long.parseLong(m.group(1).replace(",", ""));
+                if (m.find()) {
+                    long p = Long.parseLong(m.group(1).replace(",", ""));
+                    tmLog("Order price from \"{}\" lore (emeralds): {}, line=\"{}\"",
+                            stackName, p, text);
+                    return p;
+                }
             }
 
             // Priority 4: Denomination format (last resort — prone to false positives)
             for (String text : loreLines) {
                 long denomTotal = parseDenominations(text);
                 if (denomTotal > 0) {
-                    tmLog("Order price from denomination: {}", denomTotal);
+                    tmLog("Order price from \"{}\" lore (denomination): {}, line=\"{}\"",
+                            stackName, denomTotal, text);
                     return denomTotal;
                 }
             }
@@ -895,6 +978,52 @@ public class TradeMarketLogger {
         }
 
         return -1;
+    }
+
+    /**
+     * Compute total emerald value from emerald item stacks in the trade area (slots 0-53,
+     * excluding slot 28 item and slot 52 action button) of a VIEWING_ORDER container.
+     * Returns -1 if no emerald items found.
+     */
+    private long computeEmeraldTotal(List<ItemStack> items) {
+        long total = 0;
+        boolean found = false;
+        try {
+            int limit = Math.min(items.size(), 54);
+            for (int i = 0; i < limit; i++) {
+                if (i == 28 || i == 46 || i == 52) continue;
+                ItemStack stack = items.get(i);
+                if (stack == null || stack.isEmpty()) continue;
+
+                Optional<WynnItem> opt = Models.Item.getWynnItem(stack);
+                if (opt.isEmpty()) continue;
+                WynnItem wynnItem = opt.get();
+
+                // EmeraldItem covers Emerald, Emerald Block, Liquid Emerald
+                if (wynnItem instanceof EmeraldItem) {
+                    String name = ItemNameHelper.cleanItemName(stack.getHoverName().getString());
+                    int count = stack.getCount();
+                    long value = 0;
+                    if (name != null) {
+                        if (name.contains("Liquid Emerald")) {
+                            value = count * LE_MULT;
+                        } else if (name.contains("Emerald Block")) {
+                            value = count * EB_MULT;
+                        } else if (name.contains("Emerald")) {
+                            value = count; // plain emeralds
+                        }
+                    }
+                    if (value > 0) {
+                        tmLog("Emerald stack at slot {}: name=\"{}\", count={}, value={}", i, name, count, value);
+                        total += value;
+                        found = true;
+                    }
+                }
+            }
+        } catch (Exception e) {
+            tmWarn("Error computing emerald total: {}", e.getMessage());
+        }
+        return found ? total : -1;
     }
 
     /**
