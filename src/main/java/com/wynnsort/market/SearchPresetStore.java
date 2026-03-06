@@ -2,6 +2,7 @@ package com.wynnsort.market;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonSyntaxException;
 import com.google.gson.reflect.TypeToken;
 import com.wynnsort.WynnSortMod;
 import com.wynnsort.util.DiagnosticLog;
@@ -41,6 +42,9 @@ public class SearchPresetStore {
                     LOG.info("Loaded {} search presets from {}", presets.size(), STORE_PATH);
                     LOG.event("store_loaded", Map.of("count", presets.size()));
                 }
+            } catch (JsonSyntaxException e) {
+                LOG.warn("Corrupt JSON in search presets file, starting fresh: {}", e.getMessage());
+                presets.clear();
             } catch (IOException e) {
                 LOG.error("Failed to load search presets", e);
             }

@@ -188,14 +188,16 @@ public class DiagnosticScreen extends Screen {
         x += this.font.width(time) + 4;
 
         // Category (color-coded, short form)
-        int catColor = getCategoryColor(evt.category);
-        String catShort = shortCategory(evt.category);
+        String cat = evt.category != null ? evt.category : "";
+        int catColor = getCategoryColor(cat);
+        String catShort = shortCategory(cat);
         guiGraphics.drawString(this.font, catShort, x, y, catColor);
         x += this.font.width(catShort) + 4;
 
         // Event type
-        guiGraphics.drawString(this.font, evt.eventType, x, y, 0xFFDDDDDD);
-        x += this.font.width(evt.eventType) + 6;
+        String evtType = evt.eventType != null ? evt.eventType : "";
+        guiGraphics.drawString(this.font, evtType, x, y, 0xFFDDDDDD);
+        x += this.font.width(evtType) + 6;
 
         // Data summary (fill remaining width)
         int remainingWidth = this.width - x - 4;
