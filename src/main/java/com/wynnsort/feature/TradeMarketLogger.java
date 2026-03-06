@@ -115,6 +115,9 @@ public class TradeMarketLogger {
                                      long price, TransactionRecord.Type type) {}
     private PendingWithdrawal pendingWithdrawal = null;
 
+    /** Hash of last logged container contents, used to deduplicate container dumps. */
+    private String lastContainerHash = null;
+
     // Sell screen overlay: matched buy price to show when selling
     private static volatile TransactionRecord matchedBuyRecord = null;
 
@@ -226,6 +229,26 @@ public class TradeMarketLogger {
     private void logContainerContent(ContainerSetContentEvent.Post event, TradeMarketState state) {
         List<ItemStack> items = event.getItems();
         if (items == null) return;
+
+        // Deduplication: build a hash of non-empty slot names and skip if unchanged
+        StringBuilder hashBuilder = new StringBuilder();
+        for (int i = 0; i < items.size(); i++) {
+            ItemStack stack = items.get(i);
+            if (stack != null && !stack.isEmpty()) {
+                try {
+                    hashBuilder.append(i).append(':').append(stack.getHoverName().getString()).append(';');
+                } catch (Exception ignored) {
+                    hashBuilder.append(i).append(":?;");
+                }
+            }
+        }
+        String contentHash = hashBuilder.toString();
+        if (contentHash.equals(lastContainerHash)) {
+            tmLog("Container content: containerId={}, {} slots, state={} (unchanged, skipped)",
+                    event.getContainerId(), items.size(), state);
+            return;
+        }
+        lastContainerHash = contentHash;
 
         logContainerInfo("content-update");
 
@@ -384,38 +407,44 @@ public class TradeMarketLogger {
             }
         } catch (Exception ignored) {}
 
-        // Lore — use proper tooltip context with player and level
-        StringBuilder lore = new StringBuilder();
-        try {
-            Minecraft mc = Minecraft.getInstance();
-            net.minecraft.world.item.Item.TooltipContext ctx;
-            if (mc.level != null) {
-                ctx = net.minecraft.world.item.Item.TooltipContext.of(mc.level);
-            } else {
-                ctx = net.minecraft.world.item.Item.TooltipContext.EMPTY;
-            }
-            var tooltipLines = stack.getTooltipLines(ctx, mc.player,
-                    net.minecraft.world.item.TooltipFlag.NORMAL);
-            if (tooltipLines != null) {
-                int lineCount = 0;
-                for (var line : tooltipLines) {
-                    String text = line.getString();
-                    if (text == null || text.isBlank()) continue;
-                    if (lineCount++ >= 10) {
-                        lore.append("\n            | ...(+" + (tooltipLines.size() - lineCount) + " more)");
-                        break;
-                    }
-                    lore.append("\n            | ").append(text);
+        if (WynnSortConfig.INSTANCE.tradeMarketVerboseLogging) {
+            // Verbose mode: include full lore text
+            StringBuilder lore = new StringBuilder();
+            try {
+                Minecraft mc = Minecraft.getInstance();
+                net.minecraft.world.item.Item.TooltipContext ctx;
+                if (mc.level != null) {
+                    ctx = net.minecraft.world.item.Item.TooltipContext.of(mc.level);
+                } else {
+                    ctx = net.minecraft.world.item.Item.TooltipContext.EMPTY;
                 }
+                var tooltipLines = stack.getTooltipLines(ctx, mc.player,
+                        net.minecraft.world.item.TooltipFlag.NORMAL);
+                if (tooltipLines != null) {
+                    int lineCount = 0;
+                    for (var line : tooltipLines) {
+                        String text = line.getString();
+                        if (text == null || text.isBlank()) continue;
+                        if (lineCount++ >= 10) {
+                            lore.append("\n            | ...(+" + (tooltipLines.size() - lineCount) + " more)");
+                            break;
+                        }
+                        lore.append("\n            | ").append(text);
+                    }
+                }
+            } catch (Exception e) {
+                lore.append("\n            | [lore error: ").append(e.getClass().getSimpleName())
+                        .append(": ").append(e.getMessage()).append("]");
             }
-        } catch (Exception e) {
-            lore.append("\n            | [lore error: ").append(e.getClass().getSimpleName())
-                    .append(": ").append(e.getMessage()).append("]");
-        }
 
-        tmLog("  slot[{}]: name=\"{}\" wynnType={}{}{}{}", slot, hoverName,
-                wynnType, wynnDetail, priceStr,
-                lore.length() > 0 ? "\n            lore:" + lore : "");
+            tmLog("  slot[{}]: name=\"{}\" wynnType={}{}{}{}", slot, hoverName,
+                    wynnType, wynnDetail, priceStr,
+                    lore.length() > 0 ? "\n            lore:" + lore : "");
+        } else {
+            // Compact mode: one-line summary
+            tmLog("  slot[{}]: name=\"{}\" wynnType={}{}{}", slot, hoverName,
+                    wynnType, wynnDetail, priceStr);
+        }
     }
 
     private void logContainerInfo(String trigger) {
@@ -444,36 +473,39 @@ public class TradeMarketLogger {
             tmLog("API [{}]: state={}, inTradeMarket={}, inChatInput={}",
                     trigger, state, inTM, inChat);
 
-            try {
-                int unitPrice = Models.TradeMarket.getUnitPrice();
-                tmLog("API [{}]: unitPrice={}", trigger, unitPrice);
-            } catch (Exception e) {
-                tmLog("API [{}]: unitPrice=error({})", trigger, e.getMessage());
-            }
-
-            try {
-                String soldName = Models.TradeMarket.getSoldItemName();
-                tmLog("API [{}]: soldItemName=\"{}\"", trigger, soldName);
-            } catch (Exception e) {
-                tmLog("API [{}]: soldItemName=error({})", trigger, e.getMessage());
-            }
-
-            try {
-                var pci = Models.TradeMarket.getPriceCheckInfo();
-                if (pci != null) {
-                    tmLog("API [{}]: priceCheck: recommended={}, bid={}, ask={}",
-                            trigger, pci.recommendedPrice(), pci.bid(), pci.ask());
+            // Detailed API queries only in verbose mode
+            if (WynnSortConfig.INSTANCE.tradeMarketVerboseLogging) {
+                try {
+                    int unitPrice = Models.TradeMarket.getUnitPrice();
+                    tmLog("API [{}]: unitPrice={}", trigger, unitPrice);
+                } catch (Exception e) {
+                    tmLog("API [{}]: unitPrice=error({})", trigger, e.getMessage());
                 }
-            } catch (Exception e) {
-                tmLog("API [{}]: priceCheck=error({})", trigger, e.getMessage());
-            }
 
-            try {
-                String filter = Models.TradeMarket.getLastSearchFilter();
-                if (filter != null && !filter.isEmpty()) {
-                    tmLog("API [{}]: lastSearchFilter=\"{}\"", trigger, filter);
+                try {
+                    String soldName = Models.TradeMarket.getSoldItemName();
+                    tmLog("API [{}]: soldItemName=\"{}\"", trigger, soldName);
+                } catch (Exception e) {
+                    tmLog("API [{}]: soldItemName=error({})", trigger, e.getMessage());
                 }
-            } catch (Exception ignored) {}
+
+                try {
+                    var pci = Models.TradeMarket.getPriceCheckInfo();
+                    if (pci != null) {
+                        tmLog("API [{}]: priceCheck: recommended={}, bid={}, ask={}",
+                                trigger, pci.recommendedPrice(), pci.bid(), pci.ask());
+                    }
+                } catch (Exception e) {
+                    tmLog("API [{}]: priceCheck=error({})", trigger, e.getMessage());
+                }
+
+                try {
+                    String filter = Models.TradeMarket.getLastSearchFilter();
+                    if (filter != null && !filter.isEmpty()) {
+                        tmLog("API [{}]: lastSearchFilter=\"{}\"", trigger, filter);
+                    }
+                } catch (Exception ignored) {}
+            }
 
         } catch (Exception e) {
             tmWarn("API snapshot failed [{}]", trigger, e);
