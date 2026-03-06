@@ -42,6 +42,8 @@ public class WynnSortConfig {
     public int tradeMarketBuyTaxPercent = 5;
     /** Verbose trade market logging (logs every state change, container, slot, chat) */
     public boolean tradeMarketLogging = true;
+    /** Extra-verbose trade market logging: full lore text, detailed API queries, undeduped container dumps */
+    public boolean tradeMarketVerboseLogging = false;
     /** Track mythic dry streak across lootrun sessions */
     public boolean dryStreakEnabled = true;
     /** Enable market price caching and tooltip display */
