@@ -27,8 +27,6 @@ import net.minecraft.world.item.ItemStack;
 import net.neoforged.bus.api.SubscribeEvent;
 import com.wynnsort.util.DiagnosticLog;
 import com.wynnsort.util.PersistentLog;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.util.*;
 import java.util.regex.Matcher;
@@ -48,8 +46,6 @@ import java.util.stream.Collectors;
 public class TradeMarketLogger {
 
     public static final TradeMarketLogger INSTANCE = new TradeMarketLogger();
-
-    private static final Logger TM = LoggerFactory.getLogger("wynnsort.trademarket");
 
     // Chat patterns for transaction detection
     private static final Pattern CLAIM_ITEMS_PATTERN = Pattern.compile(
@@ -118,6 +114,7 @@ public class TradeMarketLogger {
     /** Tracks sells committed via commitSell() so commitWithdrawal() can skip duplicates.
      *  Key: lowercase baseName, Value: count of uncommitted chat-committed sells. */
     private final Map<String, Integer> chatCommittedSells = new LinkedHashMap<>();
+    private final Map<String, Integer> chatCommittedBuys = new LinkedHashMap<>();
 
     /** Hash of last logged container contents, used to deduplicate container dumps. */
     private String lastContainerHash = null;
@@ -128,12 +125,10 @@ public class TradeMarketLogger {
     private TradeMarketLogger() {}
 
     private static void tmLog(String msg, Object... args) {
-        TM.info("[WS:TM] " + msg, args);
         PersistentLog.info("[WS:TM] " + msg, args);
     }
 
     private static void tmWarn(String msg, Object... args) {
-        TM.warn("[WS:TM] " + msg, args);
         PersistentLog.warn("[WS:TM] " + msg, args);
     }
 
@@ -172,11 +167,12 @@ public class TradeMarketLogger {
             pendingWithdrawal = null;
         }
 
-        // Reset default sort flag and clear all pending state when trade market closes
+        // Reset default sort flag and clear transient state when trade market closes.
+        // Do NOT clear pendingSells — sells are async and may complete hours/days later;
+        // the map is bounded to 20 entries and cleaned up when sells are committed.
         if (newState == TradeMarketState.NOT_ACTIVE) {
             SortState.resetDefaultSort();
             fulfilledOrderTypes.clear();
-            pendingSells.clear();
         }
 
         lastKnownState = newState;
@@ -251,9 +247,7 @@ public class TradeMarketLogger {
         }
         String contentHash = hashBuilder.toString();
         if (contentHash.equals(lastContainerHash)) {
-            tmLog("Container content: containerId={}, {} slots, state={} (unchanged, skipped)",
-                    event.getContainerId(), items.size(), state);
-            return;
+            return; // Unchanged — skip silently
         }
         lastContainerHash = contentHash;
 
@@ -262,13 +256,15 @@ public class TradeMarketLogger {
         tmLog("Container content: containerId={}, stateId={}, {} slots, state={}",
                 event.getContainerId(), event.getStateId(), items.size(), state);
 
-        for (int i = 0; i < items.size(); i++) {
-            ItemStack stack = items.get(i);
-            if (stack == null || stack.isEmpty()) continue;
-            logSlotItem(i, stack);
+        // Per-slot details only in verbose mode to avoid log spam
+        if (WynnSortConfig.INSTANCE.tradeMarketVerboseLogging) {
+            for (int i = 0; i < items.size(); i++) {
+                ItemStack stack = items.get(i);
+                if (stack == null || stack.isEmpty()) continue;
+                logSlotItem(i, stack);
+            }
+            logApiSnapshot("content-update");
         }
-
-        logApiSnapshot("content-update");
     }
 
     // ────────────────────────────────────────────────────────────────────
@@ -284,7 +280,7 @@ public class TradeMarketLogger {
         int slot = event.getSlot();
         int containerId = event.getContainerId();
 
-        if (WynnSortConfig.INSTANCE.tradeMarketLogging) {
+        if (WynnSortConfig.INSTANCE.tradeMarketVerboseLogging) {
             if (stack == null || stack.isEmpty()) {
                 tmLog("Slot cleared: container={}, slot={}", containerId, slot);
             } else {
@@ -348,7 +344,7 @@ public class TradeMarketLogger {
         String msgType = "unknown";
         try { msgType = event.getMessageType().toString(); } catch (Exception ignored) {}
 
-        if (WynnSortConfig.INSTANCE.tradeMarketLogging && isTradeMarketRelevant()) {
+        if (WynnSortConfig.INSTANCE.tradeMarketVerboseLogging && isTradeMarketRelevant()) {
             tmLog("Chat [{}]: \"{}\"", msgType, msg);
         }
 
@@ -887,17 +883,26 @@ public class TradeMarketLogger {
         PendingWithdrawal w = pendingWithdrawal;
         pendingWithdrawal = null;
 
-        // Skip if this SELL was already committed via chat message (commitSell path)
-        if (w.type == TransactionRecord.Type.SELL && w.baseName != null) {
+        // Skip if this transaction was already committed via chat message
+        if (w.baseName != null) {
             String key = w.baseName.toLowerCase();
-            Integer count = chatCommittedSells.get(key);
-            if (count != null && count > 0) {
-                if (count == 1) chatCommittedSells.remove(key);
-                else chatCommittedSells.put(key, count - 1);
-                tmLog("Skipping withdrawal SELL for \"{}\" — already committed via chat", w.baseName);
-                // Still clean up pending sell context
-                pendingSells.remove(w.baseName.toLowerCase());
-                return;
+            if (w.type == TransactionRecord.Type.SELL) {
+                Integer count = chatCommittedSells.get(key);
+                if (count != null && count > 0) {
+                    if (count == 1) chatCommittedSells.remove(key);
+                    else chatCommittedSells.put(key, count - 1);
+                    tmLog("Skipping withdrawal SELL for \"{}\" — already committed via chat", w.baseName);
+                    pendingSells.remove(key);
+                    return;
+                }
+            } else if (w.type == TransactionRecord.Type.BUY) {
+                Integer count = chatCommittedBuys.get(key);
+                if (count != null && count > 0) {
+                    if (count == 1) chatCommittedBuys.remove(key);
+                    else chatCommittedBuys.put(key, count - 1);
+                    tmLog("Skipping withdrawal BUY for \"{}\" — already committed via chat", w.baseName);
+                    return;
+                }
             }
         }
 
@@ -1231,6 +1236,17 @@ public class TradeMarketLogger {
 
         DiagnosticLog.event(DiagnosticLog.Category.TRADE_MARKET, "transaction",
                 Map.of("type", "BUY", "item", name, "price", price));
+
+        // Track that this buy was committed via chat so commitWithdrawal() skips the duplicate
+        String buyBase = pendingBaseName != null ? pendingBaseName : name;
+        if (buyBase != null) {
+            chatCommittedBuys.merge(buyBase.toLowerCase(), 1, Integer::sum);
+            while (chatCommittedBuys.size() > 50) {
+                var it = chatCommittedBuys.entrySet().iterator();
+                it.next();
+                it.remove();
+            }
+        }
 
         pendingItemName = null;
         pendingPrice = -1;
