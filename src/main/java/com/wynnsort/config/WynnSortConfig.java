@@ -26,8 +26,15 @@ public class WynnSortConfig {
     public boolean showPercentageText = true;
     public boolean sortButtonEnabled = true;
     public String lastFilter = "";
-    /** true = use Nori/Wynnpool weighted scale, false = use default overall % */
-    public boolean useWeightedScale = true;
+    /** @deprecated Replaced by selectedScale. Kept for migration only. */
+    @Deprecated
+    public transient boolean useWeightedScale = true;
+    /**
+     * Selected scoring scale. "Overall" = GearInstance.getOverallPercentage().
+     * Otherwise "SOURCE:weightName" (e.g., "NORI:Main Scale").
+     * Empty string = auto (first available weighted scale).
+     */
+    public String selectedScale = "Overall";
     /** Show orange beacon duration tracker during lootruns */
     public boolean lootrunHudEnabled = true;
     /** Show lootrun session statistics HUD during active runs */
@@ -128,6 +135,9 @@ public class WynnSortConfig {
         }
         if (crowdsourceApiUrl == null) {
             crowdsourceApiUrl = "";
+        }
+        if (selectedScale == null) {
+            selectedScale = "Overall";
         }
     }
 

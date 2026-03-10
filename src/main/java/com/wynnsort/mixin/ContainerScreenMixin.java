@@ -6,6 +6,7 @@ import com.wynnsort.WynnSortMod;
 import com.wynnsort.config.WynnSortConfig;
 import com.wynnsort.market.SearchPreset;
 import com.wynnsort.market.SearchPresetStore;
+import com.wynnsort.util.ScaleOption;
 import com.wynnsort.util.ScoreComputation;
 import com.wynntils.core.components.Models;
 import com.wynntils.models.gear.type.GearInstance;
@@ -43,8 +44,13 @@ public abstract class ContainerScreenMixin extends Screen {
     @Unique private static final com.wynnsort.util.FeatureLogger wynnsort$LOG = new com.wynnsort.util.FeatureLogger("Mixin", com.wynnsort.util.DiagnosticLog.Category.MIXIN);
 
     @Unique private EditBox wynnsort$statInput;
-    @Unique private Button wynnsort$noriButton;
-    @Unique private Button wynnsort$overallButton;
+
+    // Dynamic scale buttons (Overall + weighted scales from Wynntils)
+    @Unique private final List<Button> wynnsort$scaleButtons = new ArrayList<>();
+    @Unique private final List<ScaleOption> wynnsort$scaleOptions = new ArrayList<>();
+    @Unique private boolean wynnsort$scalesDiscovered = false;
+    /** Y coordinate just below the last row of scale buttons */
+    @Unique private int wynnsort$scaleButtonsBottomY = 0;
 
     // Dynamic stat filter boxes
     @Unique private final List<EditBox> wynnsort$statBoxes = new ArrayList<>();
@@ -73,6 +79,9 @@ public abstract class ContainerScreenMixin extends Screen {
         wynnsort$statBoxes.clear();
         wynnsort$statNames.clear();
         wynnsort$statsBuilt = false;
+        wynnsort$scaleButtons.clear();
+        wynnsort$scaleOptions.clear();
+        wynnsort$scalesDiscovered = false;
         wynnsort$lastContainerTitle = this.getTitle().getString();
 
         if (!WynnSortConfig.INSTANCE.overlayEnabled) {
@@ -101,18 +110,9 @@ public abstract class ContainerScreenMixin extends Screen {
         this.addRenderableWidget(wynnsort$statInput);
         wynnsort$updateStatInputColor();
 
-        boolean useWeighted = WynnSortConfig.INSTANCE.useWeightedScale;
-        wynnsort$noriButton = Button.builder(
-                Component.literal(useWeighted ? "[Nori]" : "Nori"),
-                btn -> wynnsort$setScaleMode(true))
-                .pos(x, y + 20).size(58, 14).build();
-        this.addRenderableWidget(wynnsort$noriButton);
-
-        wynnsort$overallButton = Button.builder(
-                Component.literal(useWeighted ? "Overall" : "[Overall]"),
-                btn -> wynnsort$setScaleMode(false))
-                .pos(x + 62, y + 20).size(58, 14).build();
-        this.addRenderableWidget(wynnsort$overallButton);
+        // Scale buttons are built lazily once items are available (see wynnsort$buildScaleButtons)
+        // Default bottom Y before scale buttons are built (same as old Nori/Overall row bottom)
+        wynnsort$scaleButtonsBottomY = y + 20 + 14 + 2; // baseY + btnHeight + gap
 
         // Preset buttons
         wynnsort$presetButtons.clear();
@@ -193,7 +193,7 @@ public abstract class ContainerScreenMixin extends Screen {
         }
         wynnsort$editingPresetIndex = index;
         int x = leftPos + imageWidth + 8;
-        int presetNameY = topPos + 58;
+        int presetNameY = wynnsort$scaleButtonsBottomY + 18;
         wynnsort$presetNameInput = new EditBox(this.font, x, presetNameY, 120, 14, Component.literal("Preset Name"));
         wynnsort$presetNameInput.setMaxLength(24);
         wynnsort$presetNameInput.setHint(Component.literal("Preset " + (index + 1)));
@@ -252,12 +252,14 @@ public abstract class ContainerScreenMixin extends Screen {
     }
 
     @Unique
-    private void wynnsort$setScaleMode(boolean useWeighted) {
-        wynnsort$LOG.info("Scale mode: weighted={}", useWeighted);
-        WynnSortConfig.INSTANCE.useWeightedScale = useWeighted;
+    private void wynnsort$setScale(ScaleOption scale) {
+        String configKey = scale.configKey();
+        wynnsort$LOG.info("Scale selected: '{}' (configKey='{}')", scale.displayName(), configKey);
+        WynnSortConfig.INSTANCE.selectedScale = configKey;
         WynnSortConfig.save();
-        if (wynnsort$noriButton != null) wynnsort$noriButton.setMessage(Component.literal(useWeighted ? "[Nori]" : "Nori"));
-        if (wynnsort$overallButton != null) wynnsort$overallButton.setMessage(Component.literal(useWeighted ? "Overall" : "[Overall]"));
+
+        // Update button labels to highlight the selected one
+        wynnsort$refreshScaleButtonLabels();
 
         // Clear the stat filter so the scale mode applies cleanly
         if (wynnsort$statInput != null) {
@@ -266,8 +268,113 @@ public abstract class ContainerScreenMixin extends Screen {
 
         if (this.minecraft != null && this.minecraft.player != null) {
             this.minecraft.player.displayClientMessage(
-                    Component.literal("[WynnSort] Scale: " + (useWeighted ? "Nori/Wynnpool weighted" : "Overall average")), true);
+                    Component.literal("[WynnSort] Scale: " + scale.displayName()), true);
         }
+    }
+
+    @Unique
+    private void wynnsort$refreshScaleButtonLabels() {
+        String selectedKey = WynnSortConfig.INSTANCE.selectedScale;
+        if (selectedKey == null) selectedKey = "Overall";
+        for (int i = 0; i < wynnsort$scaleButtons.size() && i < wynnsort$scaleOptions.size(); i++) {
+            ScaleOption opt = wynnsort$scaleOptions.get(i);
+            boolean selected = opt.configKey().equals(selectedKey);
+            String label = selected ? "[" + opt.displayName() + "]" : opt.displayName();
+            wynnsort$scaleButtons.get(i).setMessage(Component.literal(label));
+        }
+    }
+
+    /**
+     * Discovers available scales from the first GearItem in the container and builds
+     * scale buttons dynamically. Called lazily from render once items are available.
+     */
+    @Unique
+    private void wynnsort$buildScaleButtons() {
+        if (wynnsort$scalesDiscovered) return;
+        if (!WynnSortConfig.INSTANCE.overlayEnabled) return;
+
+        AbstractContainerScreen<?> screen = (AbstractContainerScreen<?>) (Object) this;
+        String firstItemName = null;
+
+        // Find the first GearItem to discover available scales
+        for (Slot slot : screen.getMenu().slots) {
+            if (slot.container instanceof net.minecraft.world.entity.player.Inventory) continue;
+            ItemStack stack = slot.getItem();
+            if (stack.isEmpty()) continue;
+            try {
+                Optional<WynnItem> opt = Models.Item.getWynnItem(stack);
+                if (opt.isEmpty()) continue;
+                if (!(opt.get() instanceof GearItem gearItem)) continue;
+                firstItemName = gearItem.getItemInfo().name();
+                break;
+            } catch (Exception ignored) {}
+        }
+
+        if (firstItemName == null) return; // No gear items yet, try again next frame
+
+        wynnsort$scalesDiscovered = true;
+
+        // Get available weighted scales for this item
+        List<ScaleOption> weightedScales = ScoreComputation.getAllScales(firstItemName);
+
+        // Build options: Overall first, then weighted scales
+        wynnsort$scaleOptions.clear();
+        wynnsort$scaleOptions.add(ScaleOption.OVERALL);
+        wynnsort$scaleOptions.addAll(weightedScales);
+
+        // Create buttons
+        int x = leftPos + imageWidth + 8;
+        int baseY = topPos + 20;
+        String selectedKey = WynnSortConfig.INSTANCE.selectedScale;
+        if (selectedKey == null) selectedKey = "Overall";
+
+        int curX = x;
+        int curY = baseY;
+        int maxRowWidth = 260; // max width before wrapping
+        int gap = 2;
+        int btnHeight = 14;
+
+        for (int i = 0; i < wynnsort$scaleOptions.size(); i++) {
+            final ScaleOption opt = wynnsort$scaleOptions.get(i);
+            boolean selected = opt.configKey().equals(selectedKey);
+            String label = selected ? "[" + opt.displayName() + "]" : opt.displayName();
+
+            int btnWidth = this.font.width(label) + 8;
+            btnWidth = Math.max(btnWidth, 30); // minimum width
+
+            // Wrap to next row if needed
+            if (curX + btnWidth > x + maxRowWidth && curX > x) {
+                curX = x;
+                curY += btnHeight + gap;
+            }
+
+            Button btn = Button.builder(
+                    Component.literal(label),
+                    b -> wynnsort$setScale(opt))
+                    .pos(curX, curY).size(btnWidth, btnHeight).build();
+            wynnsort$scaleButtons.add(btn);
+            this.addRenderableWidget(btn);
+
+            curX += btnWidth + gap;
+        }
+
+        // Track the bottom of the scale buttons for layout below them
+        wynnsort$scaleButtonsBottomY = curY + btnHeight + gap;
+
+        // Reposition preset buttons below scale buttons
+        if (!wynnsort$presetButtons.isEmpty()) {
+            int presetX = leftPos + imageWidth + 8;
+            int presetBtnWidth = 22;
+            int presetGap = 2;
+            for (int i = 0; i < wynnsort$presetButtons.size(); i++) {
+                Button presetBtn = wynnsort$presetButtons.get(i);
+                presetBtn.setX(presetX + i * (presetBtnWidth + presetGap));
+                presetBtn.setY(wynnsort$scaleButtonsBottomY);
+            }
+        }
+
+        wynnsort$LOG.info("Scale buttons built: {} options for item '{}'",
+                wynnsort$scaleOptions.size(), firstItemName);
     }
 
     @Unique
@@ -328,7 +435,11 @@ public abstract class ContainerScreenMixin extends Screen {
         wynnsort$statsBuilt = true;
         wynnsort$statNames.addAll(stats);
         int x = leftPos + imageWidth + 8;
-        int baseY = WynnSortConfig.INSTANCE.searchPresetsEnabled ? topPos + 76 : topPos + 40;
+        // Position stat filters below scale buttons + presets
+        int baseY = wynnsort$scaleButtonsBottomY;
+        if (WynnSortConfig.INSTANCE.searchPresetsEnabled) {
+            baseY += 18; // preset buttons row height + gap
+        }
         int maxRows = Math.min(stats.size(), WYNNSORT$MAX_STAT_ROWS);
         int rowsPerCol = WYNNSORT$ROWS_PER_COL;
         for (int i = 0; i < maxRows; i++) {
@@ -390,10 +501,14 @@ public abstract class ContainerScreenMixin extends Screen {
     @Inject(method = "render", at = @At("RETURN"))
     private void wynnsort$onRender(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick, CallbackInfo ci) {
         if (!WynnSortConfig.INSTANCE.overlayEnabled) return;
+        wynnsort$buildScaleButtons();
         wynnsort$buildStatFilters();
         if (wynnsort$statsBuilt) {
             int x = leftPos + imageWidth + 8;
-            int baseY = WynnSortConfig.INSTANCE.searchPresetsEnabled ? topPos + 76 : topPos + 40;
+            int baseY = wynnsort$scaleButtonsBottomY;
+            if (WynnSortConfig.INSTANCE.searchPresetsEnabled) {
+                baseY += 18;
+            }
             int maxRows = Math.min(wynnsort$statNames.size(), wynnsort$statBoxes.size());
             int rowsPerCol = WYNNSORT$ROWS_PER_COL;
             for (int i = 0; i < maxRows; i++) {
@@ -429,7 +544,7 @@ public abstract class ContainerScreenMixin extends Screen {
                 }
             }
             if (wynnsort$presetNameInput != null && wynnsort$editingPresetIndex >= 0) {
-                guiGraphics.drawString(this.font, "Name:", leftPos + imageWidth + 8 - 30, topPos + 61, 0xFFCCCCCC);
+                guiGraphics.drawString(this.font, "Name:", leftPos + imageWidth + 8 - 30, wynnsort$scaleButtonsBottomY + 21, 0xFFCCCCCC);
             }
         }
     }

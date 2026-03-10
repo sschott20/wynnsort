@@ -17,7 +17,7 @@ public final class ScoreComputation {
 
     /**
      * Computes the display score for a gear item given the current filter state.
-     * In overall mode, uses Wynntils' weighted score (Wynnpool/Nori) when available.
+     * In overall mode, uses the selected scale from config.
      */
     public static float computeScore(GearItem gearItem, GearInstance gearInstance,
                                      List<StatFilter> filters) {
@@ -31,9 +31,16 @@ public final class ScoreComputation {
             if (ids == null || ids.isEmpty()) {
                 return Float.NaN;
             }
-            if (WynnSortConfig.INSTANCE.useWeightedScale) {
-                float weighted = getWeightedScore(gearItem);
+
+            String selectedScale = WynnSortConfig.INSTANCE.selectedScale;
+            if (selectedScale == null || selectedScale.isEmpty()) {
+                selectedScale = "Overall";
+            }
+
+            if (!"Overall".equals(selectedScale)) {
+                float weighted = getWeightedScoreForScale(gearItem, selectedScale);
                 if (!Float.isNaN(weighted) && weighted > 0.0f) return weighted;
+                // Fall through to overall if the selected scale isn't available for this item
             }
             return gearInstance.getOverallPercentage();
         } else if (filterMode) {
@@ -53,9 +60,28 @@ public final class ScoreComputation {
     }
 
     /**
+     * Attempts to get a weighted quality score using the specified scale config key.
+     * Config key format: "SOURCE:weightName" (e.g., "NORI:Main Scale").
+     * Returns NaN if no weight data is available.
+     */
+    public static float getWeightedScoreForScale(GearItem gearItem, String scaleConfigKey) {
+        try {
+            String[] parts = ScaleOption.parseConfigKey(scaleConfigKey);
+            if (parts == null) return Float.NaN;
+            return WeightedScoreHelper.computeForScale(gearItem, parts[0], parts[1]);
+        } catch (Throwable t) {
+            // WeightedScoreHelper may fail to load if Wynntils version
+            // doesn't have ItemWeight APIs
+        }
+        return Float.NaN;
+    }
+
+    /**
      * Attempts to get a weighted quality score from Wynntils' ItemWeightService
      * (Wynnpool/Nori community weights). Returns NaN if no weight data is available.
+     * @deprecated Use getWeightedScoreForScale with a specific scale config key.
      */
+    @Deprecated
     public static float getWeightedScore(GearItem gearItem) {
         try {
             return WeightedScoreHelper.compute(gearItem);
@@ -64,6 +90,19 @@ public final class ScoreComputation {
             // doesn't have ItemWeight APIs
         }
         return Float.NaN;
+    }
+
+    /**
+     * Discovers all available scales for a given item name.
+     * Wraps WeightedScoreHelper.getAllScales with try/catch for API isolation.
+     */
+    public static List<ScaleOption> getAllScales(String itemName) {
+        try {
+            return WeightedScoreHelper.getAllScales(itemName);
+        } catch (Throwable t) {
+            // WeightedScoreHelper may fail to load
+        }
+        return List.of();
     }
 
     /**

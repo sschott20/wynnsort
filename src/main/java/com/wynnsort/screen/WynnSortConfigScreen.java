@@ -58,8 +58,16 @@ public class WynnSortConfigScreen extends Screen {
                 v -> WynnSortConfig.INSTANCE.showPercentageText = v, centerX, y, btnW, btnH);
         y += spacing;
 
-        addToggle("Weighted Scale (Nori/Wynnpool)", WynnSortConfig.INSTANCE.useWeightedScale,
-                v -> WynnSortConfig.INSTANCE.useWeightedScale = v, centerX, y, btnW, btnH);
+        // Selected scale - read-only display, changed via trade market screen buttons
+        String scaleName = WynnSortConfig.INSTANCE.selectedScale;
+        if (scaleName == null || scaleName.isEmpty()) scaleName = "Overall";
+        addRenderableWidget(Button.builder(
+                Component.literal("Scale: " + scaleName),
+                b -> {
+                    // Cycle between Overall and keeping current (reset to Overall)
+                    WynnSortConfig.INSTANCE.selectedScale = "Overall";
+                    rebuildWidgets();
+                }).bounds(centerX - btnW / 2, y, btnW, btnH).build());
         y += spacing;
 
         // --- Trade Market ---
